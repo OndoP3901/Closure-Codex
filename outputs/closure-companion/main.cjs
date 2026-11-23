@@ -1,27 +1,26 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, Tray } = require('electron')
-const { spawn } = require('node:child_process')
+const { app, BrowserWindow, dialog, ipcMain, protocol, screen, session } = require('electron')
+const { spawn, execFile } = require('node:child_process')
+const { promisify } = require('node:util')
 const { mkdir, readFile, rename, writeFile } = require('node:fs/promises')
 const readline = require('node:readline')
 const path = require('node:path')
 const os = require('node:os')
 const { createActivity } = require('./activity.cjs')
 const { createQuota } = require('./quota.cjs')
+const { createRuntimeController } = require('./runtime-settings.cjs')
 
 const scheme = 'closure-pet'
 const origin = `${scheme}://local`
 const demo = process.argv.includes('--demo')
 const smoke = process.argv.includes('--smoke')
 const canvas = process.argv.includes('--canvas')
-const noTray = process.argv.includes('--no-tray')
 const dev = demo || smoke
 const profile = process.env.CLOSURE_STATE_DIR || path.join(__dirname, '.closure-profile')
 const assets = path.join(__dirname, 'upstream', 'assets')
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
-const crtSettingsPath = process.env.CLOSURE_CRT_SETTINGS_FILE || path.resolve(__dirname, '../../work/crt-settings.ini')
-const launchModePath = path.join(profile, 'launch-mode.txt')
-const defaultCrt = { scanlines: true, vignette: true, strength: 100, appearance: 'system', dshChrome: true }
-let crtWrite = Promise.resolve()
-
+const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+const autostart = path.resolve(__dirname, '../closure-autostart')
+const runFile = promisify(execFile)
 app.setName('Closure Companion')
 app.setPath('userData', profile)
 app.setPath('sessionData', path.join(profile, 'chromium'))
@@ -36,52 +35,11 @@ const mime = {
 }
 const staticPaths = { '/': 'index.html', '/bridge.js': 'bridge.js' }
 
-function validCrt(value) {
-  return value && typeof value.scanlines === 'boolean' && typeof value.vignette === 'boolean' && typeof value.dshChrome === 'boolean' &&
-    Number.isInteger(value.strength) && value.strength >= 0 && value.strength <= 150 &&
-    ['system', 'dark', 'light'].includes(value.appearance)
-}
-
-async function readCrt() {
-  try {
-    const values = (await readFile(crtSettingsPath, 'utf8')).trim().split(/\r?\n/)
-    const value = { scanlines: values[0] === '1', vignette: values[1] === '1', strength: Number(values[2]), appearance: values[3], dshChrome: values[4] !== '0' }
-    if (/^[01]$/.test(values[0]) && /^[01]$/.test(values[1]) && (values.length === 4 ||
-        (values.length === 5 && /^[01]$/.test(values[4]))) && validCrt(value)) return value
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error
-  }
-  return defaultCrt
-}
-
-async function updateCrt(request) {
-  const value = await request.json().catch(() => null)
-  if (!validCrt(value)) return new Response(null, { status: 400 })
-  const task = crtWrite.then(async () => {
-    await mkdir(path.dirname(crtSettingsPath), { recursive: true })
-    const temporary = `${crtSettingsPath}.${process.pid}.tmp`
-    await writeFile(temporary, `${Number(value.scanlines)}\n${Number(value.vignette)}\n${value.strength}\n${value.appearance}\n${Number(value.dshChrome)}\n`, 'utf8')
-    await rename(temporary, crtSettingsPath)
-  })
-  crtWrite = task.catch(() => {})
-  await task
-  return Response.json(value)
-}
-
 function registerProtocol(getActivityState) {
   protocol.handle(scheme, async (request) => {
     const url = new URL(request.url)
     if (url.hostname !== 'local') return new Response(null, { status: 404 })
-    if (url.pathname === '/dsh-closure/crt') {
-      try {
-        if (request.method === 'GET') { await crtWrite; return Response.json(await readCrt()) }
-        if (request.method === 'PUT') return await updateCrt(request)
-        return new Response(null, { status: 405 })
-      } catch (error) {
-        console.error('Closure CRT settings:', error.message)
-        return new Response(null, { status: 500 })
-      }
-    }
+    if (url.pathname === '/dsh-closure/crt') return new Response(null, { status: 410 })
     if (url.pathname === '/dsh-closure/config' && request.method === 'PUT') return new Response(null, { status: 204 })
     if (request.method !== 'GET') return new Response(null, { status: 405 })
     if (url.pathname === '/dsh-closure/state') {
@@ -139,20 +97,39 @@ function followCodex(win, report, onLost) {
   }
 }
 
+async function startupSetting(enabled) {
+  const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', path.join(autostart, 'Configure.ps1')]
+  if (enabled === undefined) args.push('-Status')
+  else {
+    args.push('-RegistrationOnly')
+    if (!enabled) args.push('-Disable')
+  }
+  const { stdout } = await runFile(powershell, args, { windowsHide: true, timeout: 15000 })
+  return enabled === undefined ? JSON.parse(stdout.trim()).startAtLogin : enabled
+}
+
+function startWatcher() {
+  const child = spawn(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', path.join(autostart, 'Watch-Codex.ps1'), '-Refresh'], {
+    windowsHide: true, detached: true, stdio: 'ignore',
+  })
+  child.on('error', (error) => console.error('Closure lifecycle:', error.message))
+  child.unref()
+}
+
 function managePetWindow(win) {
-  let mode = 'codex'
+  let showOutsideCodex = true
   let desktopDisplay
   let codexBounds
   let stopTracker
-  let paused = false
   let ready = false
   let loaded = false
-  let tray
 
   function syncWindow() {
     if (win.isDestroyed()) return
     let bounds
-    if (mode === 'standalone') {
+    if (showOutsideCodex) {
       const display = screen.getAllDisplays().find(({ id }) => id === desktopDisplay) || screen.getPrimaryDisplay()
       desktopDisplay = display.id
       bounds = display.workArea
@@ -160,69 +137,61 @@ function managePetWindow(win) {
       bounds = screen.screenToDipRect(null, codexBounds)
     }
     if (bounds) win.setBounds(bounds)
-    if (ready && bounds && !paused) {
+    if (ready && bounds) {
       if (!win.isVisible()) win.showInactive()
     } else if (win.isVisible()) {
       win.hide()
     }
   }
 
-  function syncTray() {
-    if (mode === 'codex' && noTray) {
-      tray?.destroy()
-      tray = undefined
-      return
-    }
-    if (!tray) {
-      tray = new Tray(path.join(__dirname, 'upstream', 'icon.png'))
-      tray.setToolTip('可露希尔 · Codex 桌宠')
-    }
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: '显示桌宠', type: 'checkbox', checked: !paused, click: (item) => { paused = !item.checked; syncWindow() } },
-      { label: '退出可露希尔桌宠', click: () => app.quit() },
-    ]))
-  }
   const displayEvents = ['display-metrics-changed', 'display-added', 'display-removed']
   displayEvents.forEach((event) => screen.on(event, syncWindow))
   win.once('closed', () => {
     displayEvents.forEach((event) => screen.removeListener(event, syncWindow))
     stopTracker?.()
-    tray?.destroy()
   })
 
-  return async (nextMode) => {
+  const setShowOutsideCodex = async (enabled) => {
     stopTracker?.()
-    if (nextMode === 'standalone') {
+    if (enabled) {
       const display = loaded && win.isVisible()
         ? screen.getDisplayMatching(win.getBounds()) : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
       desktopDisplay = display.id
     }
-    mode = nextMode
-    paused = false
+    showOutsideCodex = enabled
     codexBounds = null
-    ready = false
-    syncTray()
-    if (mode === 'codex') {
-      stopTracker = followCodex(win, (bounds) => {
-        codexBounds = bounds
-        syncWindow()
-      }, () => {
-        codexBounds = null
-        syncWindow()
-        if (noTray) app.quit()
-      })
+    if (!showOutsideCodex) {
+      let cancelled = false
+      let retry
+      let stop
+      const track = () => {
+        stop = followCodex(win, (bounds) => {
+          codexBounds = bounds
+          syncWindow()
+        }, () => {
+          codexBounds = null
+          syncWindow()
+          // Recover a failed tracker independently of the pet process.
+          if (!cancelled) retry = setTimeout(track, 1000)
+        })
+      }
+      stopTracker = () => { cancelled = true; clearTimeout(retry); stop?.() }
+      track()
     } else {
       stopTracker = undefined
     }
     syncWindow()
+  }
+  const setLinked = async (enabled) => {
     const query = new URLSearchParams()
     if (canvas) query.set('canvas', '1')
-    if (mode === 'standalone') query.set('mode', mode)
+    query.set('codexLinked', String(enabled))
     await win.loadURL(`${origin}/?${query}`)
     loaded = true
     ready = true
     syncWindow()
   }
+  return { setLinked, setShowOutsideCodex }
 }
 
 function registerInput(win) {
@@ -255,6 +224,74 @@ function registerInput(win) {
   })
   win.on('hide', stopPolling)
   win.once('closed', stopPolling)
+}
+
+function registerExit(win) {
+  ipcMain.on('closure:quit', (event) => {
+    if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) return
+    app.quit()
+  })
+}
+
+function registerRuntimeSettings(win, runtime) {
+  const trusted = (event) => event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame
+  ipcMain.handle('closure:runtime-settings', async (event) => {
+    if (!trusted(event)) return null
+    return runtime.refresh()
+  })
+  ipcMain.handle('closure:set-runtime-setting', (event, key, enabled) => {
+    if (!trusted(event)) return { ok: false, error: '无法修改此设置。' }
+    return runtime.update(key, enabled)
+  })
+}
+
+async function runRuntimeSmoke(win) {
+  const waitFor = async (source) => {
+    for (let n = 0; n < 100; n++) {
+      if (await win.webContents.executeJavaScript(source)) return
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    throw new Error(`Runtime settings check timed out: ${source}`)
+  }
+  await waitFor(`window.__dshClosurePet?.phase === 'running'`)
+  await win.webContents.executeJavaScript('window.__dshClosurePet.openPanel()')
+  const selector = (label) => `document.querySelector('input[aria-label="${label}"]')`
+  await waitFor(`${selector('开机自启')}?.checked && !${selector('开机自启')}.disabled`)
+  await win.webContents.executeJavaScript(`${selector('开机自启')}.click()`)
+  await waitFor(`!${selector('开机自启')}.disabled && !${selector('开机自启')}.checked`)
+  await waitFor(`${selector('在桌面和其他软件中显示')}?.checked && ${selector('Codex 联动')}.checked`)
+  await win.webContents.executeJavaScript(`${selector('在桌面和其他软件中显示')}.click()`)
+  await waitFor(`!${selector('在桌面和其他软件中显示')}.disabled && !${selector('在桌面和其他软件中显示')}.checked && ${selector('Codex 联动')}.checked`)
+  await win.webContents.executeJavaScript(`${selector('Codex 联动')}.click()`)
+  await waitFor(`location.search.includes('codexLinked=false') && window.__dshClosurePet?.phase === 'running'`)
+  await win.webContents.executeJavaScript('window.__dshClosurePet.openPanel()')
+  await waitFor(`${selector('Codex 联动')} && !${selector('Codex 联动')}.disabled && !${selector('Codex 联动')}.checked`)
+  await waitFor(`!${selector('在桌面和其他软件中显示')}.checked`)
+  await win.webContents.executeJavaScript(`${selector('在桌面和其他软件中显示')}.click()`)
+  await waitFor(`!${selector('在桌面和其他软件中显示')}.disabled && ${selector('在桌面和其他软件中显示')}.checked && !${selector('Codex 联动')}.checked`)
+  const unlinked = await win.webContents.executeJavaScript(`(async () => {
+    const panel = document.querySelector('#dsh-closure-pet-settings')
+    const runtime = await window.closureCompanion.getRuntimeSettings()
+    const headings = [...panel.querySelectorAll('summary')].map((item) => item.textContent)
+    return getComputedStyle(panel).display === 'block' && !runtime.codexLinked && runtime.showOutsideCodex && !runtime.startAtLogin && !panel.textContent.includes('运行模式') &&
+      !panel.textContent.includes('独立桌面') && !headings.includes('CRT 显示效果') &&
+      !headings.includes('提醒与播报') && !panel.querySelector('[data-scene]')
+  })()`)
+  if (!unlinked) throw new Error('Unlinked desktop controls did not update')
+  if (process.env.CLOSURE_RUNTIME_SMOKE_PNG) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    await writeFile(process.env.CLOSURE_RUNTIME_SMOKE_PNG, (await win.webContents.capturePage()).toPNG())
+  }
+  await win.loadURL(win.webContents.getURL())
+  await waitFor(`window.__dshClosurePet?.phase === 'running'`)
+  await win.webContents.executeJavaScript('window.__dshClosurePet.openPanel()')
+  await waitFor(`${selector('开机自启')} && !${selector('开机自启')}.disabled && !${selector('开机自启')}.checked`)
+  await win.webContents.executeJavaScript(`${selector('Codex 联动')}.click()`)
+  await waitFor(`location.search.includes('codexLinked=true') && window.__dshClosurePet?.phase === 'running'`)
+  const linkedDesktop = await win.webContents.executeJavaScript(`window.closureCompanion.getRuntimeSettings().then((settings) =>
+    settings.codexLinked && settings.showOutsideCodex && !settings.startAtLogin)`)
+  if (!linkedDesktop) throw new Error('Activity linkage changed desktop display or startup')
+  console.log(JSON.stringify({ runtimeCheckboxes: true, startupIndependent: true, outsideCodexIndependent: true, linkedAndUnlinkedReload: true }))
 }
 
 async function runSmoke(win) {
@@ -507,25 +544,8 @@ async function runSmoke(win) {
     previewButton.click()
     const expressionPreview = pet.animation === 'Sad_Begin' && getComputedStyle(settings).display === 'none'
     pet.openPanel()
-    const crtPanel = [...settings.querySelectorAll('details')].find((item) => item.querySelector('summary').textContent === 'CRT 显示效果')
-    crtPanel.open = true
-    const crtFields = crtPanel.querySelector('fieldset')
-    const crtUrl = '/dsh-closure/crt'
-    if (!await waitFor(() => !crtFields.disabled)) throw new Error('CRT controls failed to load')
-    const [scanlines, vignette, dshChrome] = crtFields.querySelectorAll('input[type=checkbox]')
-    const slider = crtFields.querySelector('input[type=range]')
-    scanlines.checked = false
-    vignette.checked = true
-    dshChrome.checked = false
-    slider.value = '135'
-    crtFields.querySelector('input[value=light]').checked = true
-    slider.dispatchEvent(new Event('change', { bubbles: true }))
-    const crtSettingsSaved = await waitFor(async () => {
-      if (crtFields.disabled) return false
-      const response = await fetch(crtUrl)
-      const saved = await response.json()
-      return !saved.scanlines && saved.vignette && !saved.dshChrome && saved.strength === 135 && saved.appearance === 'light'
-    })
+    const legacyDecorationRemoved = ![...settings.querySelectorAll('summary')].some((item) => item.textContent === 'CRT 显示效果') &&
+      (await fetch('/dsh-closure/crt')).status === 410
     pet.closePanel()
     pet.play('Idle', true)
     const now = Date.now
@@ -613,7 +633,7 @@ async function runSmoke(win) {
     }
     defaultMode.click()
     return { dragged, clicked, panelOpened, fpsSliderWorks, notificationsSaved, defaultQueues, defaultOverridesPersonal, queueEditor, voiceSettings, voiceVolumeWorks,
-      startVoice, clickKeepsDialogue, startRotates, expressionPreview, crtSettingsSaved, startupScheduled,
+      startVoice, clickKeepsDialogue, startRotates, expressionPreview, legacyDecorationRemoved, startupScheduled,
       workingDialogue, workingOnlyOnce, completionDialogue, failedTurnSkipsCompletion, idleDialogue, idleOnlyOnce,
       startupDialogue, noQuotaOnClick, automaticQuota, noQuotaSticker, clickSharesWorkingQueue, interactionRotates,
       questionVoice, answerRotation,
@@ -643,16 +663,203 @@ async function runSmoke(win) {
   console.log(JSON.stringify({ ...result, ...reloaded }))
 }
 
+async function runBubbleFollowSmoke(win) {
+  const result = await win.webContents.executeJavaScript(`(async () => {
+    for (let n = 0; n < 100 && window.__dshClosurePet?.phase !== 'running'; n++) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const pet = window.__dshClosurePet
+    pet.cancelStartup()
+    pet.closePanel()
+    const host = document.querySelector('#dsh-closure-pet')
+    const canvas = host.querySelector('canvas')
+    pet.showBubble('博士，拖动时这句话也会跟着走。', 60000)
+    await document.fonts.ready
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    const bubble = document.querySelector('#dsh-closure-pet-bubble')
+    const text = bubble.textContent
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const follows = () => {
+      const rect = host.getBoundingClientRect()
+      const w = parseFloat(bubble.style.width) - 6
+      const h = parseFloat(bubble.style.height) - 6
+      const center = rect.left + rect.width / 2
+      let left = Math.round(center - w * (center < innerWidth / 2 ? .32 : .68))
+      left = Math.min(Math.max(8, left), Math.max(8, innerWidth - w - 6 - 8))
+      let top = Math.round(rect.top - h - 2)
+      const below = top < 8
+      if (below) top = Math.round(rect.bottom + 2)
+      top = Math.min(Math.max(8, top), Math.max(8, innerHeight - h - 6 - 8))
+      return Math.abs(parseFloat(bubble.style.left) - left) <= 2 &&
+        Math.abs(parseFloat(bubble.style.top) - top) <= 2 &&
+        bubble.style.transformOrigin === (below ? 'center top' : 'center bottom')
+    }
+    let point
+    const initial = canvas.getBoundingClientRect()
+    for (let y = initial.top + 3; y < initial.bottom && !point; y += 6) {
+      for (let x = initial.left + 3; x < initial.right; x += 6) {
+        if (pet.hitTest(x, y)) { point = { x, y }; break }
+      }
+    }
+    if (!point) throw new Error('No drag hit point')
+    const pointer = (type, x, y) => canvas.dispatchEvent(new PointerEvent(type, {
+      pointerId: 7, pointerType: 'mouse', button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true,
+    }))
+    pointer('pointerdown', point.x, point.y)
+    let measurements = 0
+    const measure = CanvasRenderingContext2D.prototype.measureText
+    CanvasRenderingContext2D.prototype.measureText = function (...args) {
+      measurements++
+      return measure.apply(this, args)
+    }
+    let midDrag, noTextMeasurement, flippedBelow, flippedAbove, snapFollows = true, snapMoved
+    try {
+      const moveTo = async (left, top) => {
+        pointer('pointermove', point.x + left - initial.left, point.y + top - initial.top)
+        await frame()
+        return follows()
+      }
+      midDrag = await moveTo(300, 200)
+      noTextMeasurement = measurements === 0 && bubble.textContent === text
+      flippedBelow = await moveTo(0, 0) && bubble.style.transformOrigin === 'center top'
+      flippedAbove = await moveTo(0, 240) && bubble.style.transformOrigin === 'center bottom'
+      pointer('pointerup', point.x - initial.left, point.y + 240 - initial.top)
+      let previousLeft = host.getBoundingClientRect().left
+      snapMoved = false
+      const until = performance.now() + 290
+      while (performance.now() < until) {
+        await frame()
+        snapFollows = snapFollows && follows()
+        const left = host.getBoundingClientRect().left
+        if (Math.abs(left - previousLeft) > .1) snapMoved = true
+        previousLeft = left
+      }
+      const settled = canvas.getBoundingClientRect()
+      let nextPoint
+      for (let y = settled.top + 3; y < settled.bottom && !nextPoint; y += 6) {
+        for (let x = settled.left + 3; x < settled.right; x += 6) {
+          if (pet.hitTest(x, y)) { nextPoint = { x, y }; break }
+        }
+      }
+      if (!nextPoint) throw new Error('No settled drag hit point')
+      pointer('pointerdown', nextPoint.x, nextPoint.y)
+      pointer('pointermove', nextPoint.x + 40, nextPoint.y - 20)
+      pet.hideBubble()
+      const hiddenPosition = bubble.style.left + ':' + bubble.style.top
+      await frame()
+      const hiddenStaysHidden = bubble.style.opacity === '0' && hiddenPosition === bubble.style.left + ':' + bubble.style.top
+      pointer('pointercancel', nextPoint.x + 40, nextPoint.y - 20)
+      return { midDrag, noTextMeasurement, flippedBelow, flippedAbove, snapFollows, snapMoved, hiddenStaysHidden }
+    } finally {
+      CanvasRenderingContext2D.prototype.measureText = measure
+      pet.hideBubble()
+      pet.resetPosition()
+    }
+  })()`)
+  if (!Object.values(result).every(Boolean)) throw new Error(`Bubble follow check failed: ${JSON.stringify(result)}`)
+  console.log(JSON.stringify({ bubbleFollow: result }))
+}
+
+async function runBubbleAppearanceSmoke(win) {
+  const waitReady = async () => {
+    for (let n = 0; n < 100; n++) {
+      if (await win.webContents.executeJavaScript("window.__dshClosurePet?.phase === 'running'")) return
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    throw new Error('Bubble settings fixture did not start')
+  }
+  await waitReady()
+  const evaluate = source => win.webContents.executeJavaScript(source)
+  const controls = await evaluate(`(async () => {
+    const pet = window.__dshClosurePet
+    pet.cancelStartup()
+    pet.showBubble('博士，对话字号与气泡宽度可以分别调整，拖动时也会继续跟随。'.repeat(3), 60000)
+    await document.fonts.ready
+    await new Promise(resolve => setTimeout(resolve, 350))
+    pet.openPanel()
+    const panel = document.querySelector('#dsh-closure-pet-settings')
+    const font = panel.querySelector('[aria-label="对话字号"]'), scale = panel.querySelector('[aria-label="气泡大小"]')
+    const bubble = document.querySelector('#dsh-closure-pet-bubble'), text = bubble.lastElementChild
+    const originalText = bubble.textContent.replace(/\\s/g, '')
+    const defaults = font.value === '24' && scale.value === '1'
+    const set = (input, value) => { input.value = value; input.dispatchEvent(new Event('input', { bubbles:true })) }
+    set(font, '18')
+    const fontWorks = getComputedStyle(text).fontSize === '18px' && scale.value === '1' && bubble.style.opacity === '1'
+    set(font, '24');set(scale, '.6')
+    const narrowWidth = parseFloat(bubble.style.width)
+    set(scale, '1.6')
+    const scaleWorks = parseFloat(bubble.style.width) > narrowWidth && getComputedStyle(text).fontSize === '24px'
+    set(font, '36')
+    const largeFont = getComputedStyle(text).fontSize === '36px' && bubble.textContent.replace(/\\s/g, '') === originalText
+    pet.setSettings({ bubble:false })
+    set(font, '30')
+    const disabledStaysHidden = bubble.style.opacity === '0'
+    pet.setSettings({ bubble:true })
+    set(font, '36')
+    pet.showBubble('博士，对话字号与气泡宽度可以分别调整，拖动时也会继续跟随。'.repeat(3), 60000)
+    return { defaults, fontWorks, scaleWorks, largeFont, disabledStaysHidden }
+  })()`)
+  win.webContents.debugger.attach('1.3')
+  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width:320,height:300,deviceScaleFactor:1,mobile:false })
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const smallScreen = await evaluate(`(() => {
+    const bubble=document.querySelector('#dsh-closure-pet-bubble'),r=bubble.getBoundingClientRect()
+    const font=parseFloat(getComputedStyle(bubble.lastElementChild).fontSize)
+    return {fits:r.left>=7 && r.top>=7 && r.right<=innerWidth-7 && r.bottom<=innerHeight-7 &&
+      font<36 && window.__dshClosurePet.settings.bubbleFontSize===36,
+      rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},width:innerWidth,height:innerHeight,font}
+  })()`)
+  await win.webContents.debugger.sendCommand('Emulation.clearDeviceMetricsOverride')
+  win.webContents.debugger.detach()
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const restored = await evaluate(`(() => {
+    const pet=window.__dshClosurePet,bubble=document.querySelector('#dsh-closure-pet-bubble')
+    const restored=getComputedStyle(bubble.lastElementChild).fontSize==='36px'
+    pet.setSettings({bubbleFontSize:30,bubbleScale:1.25});pet.openPanel()
+    const saved=JSON.parse(localStorage.getItem('dshcl-settings'))
+    return restored && saved.bubbleFontSize===30 && saved.bubbleScale===1.25 &&
+      document.querySelector('[aria-label="对话字号"]').value==='30' && document.querySelector('[aria-label="气泡大小"]').value==='1.25'
+  })()`)
+  if (process.env.CLOSURE_BUBBLE_PNG) await writeFile(process.env.CLOSURE_BUBBLE_PNG, (await win.webContents.capturePage()).toPNG())
+  await win.loadURL(win.webContents.getURL())
+  await waitReady()
+  const persisted = await evaluate("window.__dshClosurePet.settings.bubbleFontSize===30 && window.__dshClosurePet.settings.bubbleScale===1.25")
+  const result={...controls,smallScreen:smallScreen.fits,restored,persisted}
+  if (!Object.values(result).every(Boolean)) throw new Error('Bubble appearance check failed: '+JSON.stringify({...result,smallScreenDetails:smallScreen}))
+  console.log(JSON.stringify({bubbleAppearance:result}))
+}
+
+async function runExitSmoke(win) {
+  for (let n = 0; n < 100; n++) {
+    if (await win.webContents.executeJavaScript("window.__dshClosurePet?.phase === 'running'")) break
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  const timeout = setTimeout(() => { console.error('Right-click exit did not quit'); app.exit(1) }, 3000)
+  app.once('before-quit', () => {
+    clearTimeout(timeout)
+    console.log(JSON.stringify({ rightClickExit: true }))
+  })
+  const found = await win.webContents.executeJavaScript(`(() => {
+    window.__dshClosurePet.openPanel()
+    const panel = document.querySelector('#dsh-closure-pet-settings')
+    const button = [...panel.querySelectorAll('button')].find((item) => item.textContent === '退出桌宠')
+    if (!button || getComputedStyle(panel).display !== 'block') return false
+    setTimeout(() => button.click(), 100)
+    return true
+  })()`)
+  if (!found) throw new Error('Right-click menu has no exit button')
+}
+
 if (!smoke && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.whenReady().then(async () => {
     let activity
     let quota
-    function configureActivity(mode) {
+    function configureActivity(codexLinked) {
       activity?.stop()
       quota?.stop()
-      const followActivity = mode === 'codex' && !dev && process.argv.includes('--follow-activity')
+      const followActivity = codexLinked && !dev && !process.argv.includes('--no-activity')
       activity = createActivity(followActivity, path.join(codexHome, 'sessions'))
       quota = followActivity ? createQuota({ enabled: true, home: codexHome }) : null
     }
@@ -678,56 +885,46 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     })
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     win.webContents.on('will-navigate', (event) => event.preventDefault())
+    registerExit(win)
     if (!dev) {
       registerInput(win)
       win.webContents.once('render-process-gone', () => app.exit(1))
-      const showMode = managePetWindow(win)
-      let mode = 'codex'
-      try {
-        if ((await readFile(launchModePath, 'utf8')).trim() === 'standalone') mode = 'standalone'
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error
-      }
-      let switching = false
-      ipcMain.handle('closure:launch-mode', async (event, nextMode) => {
-        if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame ||
-            !['codex', 'standalone'].includes(nextMode) || switching) return false
-        if (nextMode === mode) return true
-        switching = true
-        try {
-          await mkdir(profile, { recursive: true })
-          const temporary = `${launchModePath}.${process.pid}.tmp`
-          await writeFile(temporary, nextMode + '\n', 'utf8')
-          await rename(temporary, launchModePath)
-        } catch (error) {
-          console.error('Closure launch mode:', error.message)
-          switching = false
-          return false
-        }
-        mode = nextMode
-        setImmediate(async () => {
-          try {
-            configureActivity(mode)
-            await showMode(mode)
-          } catch (error) {
-            console.error('Closure launch mode:', error.message)
-            app.exit(1)
-          } finally {
-            switching = false
-          }
-        })
-        return true
+      const runtime = await createRuntimeController({
+        profile, setStartup: startupSetting,
+        onLinkedChange: async (enabled) => {
+          configureActivity(enabled)
+          await petWindow.setLinked(enabled)
+        },
+        onDisplayChange: async (enabled) => { await petWindow.setShowOutsideCodex(enabled) },
       })
-      configureActivity(mode)
-      await showMode(mode)
+      const petWindow = managePetWindow(win)
+      registerRuntimeSettings(win, runtime)
+      configureActivity(runtime.snapshot().codexLinked)
+      await petWindow.setShowOutsideCodex(runtime.snapshot().showOutsideCodex)
+      await petWindow.setLinked(runtime.snapshot().codexLinked)
+      startWatcher()
     } else {
-      configureActivity('codex')
+      configureActivity(true)
+      if (smoke) {
+        // Exercise the production controller and IPC without changing Windows startup.
+        let registered = true
+        const runtime = await createRuntimeController({
+          profile,
+          setStartup: async (enabled) => { if (enabled !== undefined) registered = enabled; return registered },
+          onLinkedChange: async (enabled) => { await win.loadURL(`${origin}/?codexLinked=${enabled}${canvas ? '&canvas=1' : ''}`) },
+        })
+        await runtime.update('codexLinked', true)
+        registerRuntimeSettings(win, runtime)
+      }
       await win.loadURL(`${origin}/${canvas ? '?canvas=1' : ''}`)
     }
     if (demo) win.show()
     if (smoke) {
       await runSmoke(win)
-      app.exit(0)
+      await runBubbleAppearanceSmoke(win)
+      await runBubbleFollowSmoke(win)
+      await runRuntimeSmoke(win)
+      await runExitSmoke(win)
     }
   }).catch((error) => {
     console.error(error)

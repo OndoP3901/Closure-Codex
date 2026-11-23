@@ -5,7 +5,7 @@
 // 面板 DOM 懒创建（第一次 open 时），关闭只是 display:none。
 
 import { PREFIX, SIZE_MIN, SIZE_MAX } from '../core/env.js'
-import { FPS_MIN, FPS_MAX, VOICE_LANGUAGES } from '../shared/protocol.js'
+import { FPS_MIN, FPS_MAX, BUBBLE_FONT_MIN, BUBBLE_FONT_MAX, BUBBLE_SCALE_MIN, BUBBLE_SCALE_MAX, VOICE_LANGUAGES } from '../shared/protocol.js'
 import { createVoiceQueues } from './voice-queues.js'
 
 export function createPanel(deps) {
@@ -51,24 +51,58 @@ export function createPanel(deps) {
       return el
     }
 
-    if (deps.setLaunchMode) {
-      const modeRow = row('运行模式')
-      const switchMode = document.createElement('button')
-      const label = deps.standalone ? '独立桌面' : 'Codex 联动'
-      switchMode.type = 'button'
-      switchMode.textContent = label
-      switchMode.setAttribute('aria-label', label + '，点击切换运行模式')
-      switchMode.style.cssText = 'padding:3px 9px;border-radius:6px;border:1px solid #545969;background:#525ca9;color:inherit;font:inherit;cursor:pointer'
-      switchMode.addEventListener('click', async () => {
-        switchMode.disabled = true
-        switchMode.textContent = '切换中…'
-        try {
-          if (await deps.setLaunchMode(deps.standalone ? 'codex' : 'standalone')) return
-        } catch {}
-        switchMode.textContent = '切换失败 · 重试'
-        switchMode.disabled = false
-      })
-      modeRow.appendChild(switchMode)
+    const runtimeControls = {}
+    const runtimeStatus = document.createElement('div')
+    runtimeStatus.setAttribute('role', 'status')
+    runtimeStatus.style.cssText = 'color:#ffb8c9;max-width:260px'
+    function disableRuntime(disabled) {
+      Object.values(runtimeControls).forEach((input) => { input.disabled = disabled })
+    }
+    function syncRuntime(value) {
+      for (const [key, input] of Object.entries(runtimeControls)) input.checked = value[key] === true
+      runtimeStatus.textContent = value.startupError || ''
+    }
+    async function refreshRuntime() {
+      if (!deps.getRuntimeSettings) return
+      disableRuntime(true)
+      try {
+        const value = await deps.getRuntimeSettings()
+        if (!value) throw new Error('No settings')
+        syncRuntime(value)
+      } catch {
+        runtimeStatus.textContent = '设置未读取，请重新打开菜单。'
+      } finally {
+        disableRuntime(false)
+        positionPanel()
+      }
+    }
+    if (deps.setRuntimeSetting) {
+      for (const [key, label] of [['codexLinked', 'Codex 联动'], ['showOutsideCodex', '在桌面和其他软件中显示'], ['startAtLogin', '开机自启']]) {
+        const settingRow = row(label)
+        const checkbox = document.createElement('input')
+        checkbox.type = 'checkbox'
+        checkbox.checked = key === 'codexLinked' ? !deps.standalone : key === 'showOutsideCodex'
+        checkbox.setAttribute('aria-label', label)
+        runtimeControls[key] = checkbox
+        checkbox.addEventListener('change', async () => {
+          const previous = !checkbox.checked
+          disableRuntime(true)
+          runtimeStatus.textContent = ''
+          try {
+            const result = await deps.setRuntimeSetting(key, checkbox.checked)
+            if (!result?.ok) throw new Error(result?.error || '设置未保存，请重试。')
+            syncRuntime(result)
+          } catch (error) {
+            checkbox.checked = previous
+            runtimeStatus.textContent = error.message
+          } finally {
+            disableRuntime(false)
+            positionPanel()
+          }
+        })
+        settingRow.appendChild(checkbox)
+      }
+      panel.appendChild(runtimeStatus)
     }
 
     // 镜像
@@ -169,6 +203,42 @@ export function createPanel(deps) {
     })
     syncBubbleBtn()
     bubbleRow.appendChild(bubbleBtn)
+
+    const bubbleControls = []
+    function bubbleSlider(label, key, min, max, step, format) {
+      const settingRow = row(label)
+      const wrap = document.createElement('span')
+      wrap.style.cssText = 'display:inline-flex;align-items:center;gap:8px'
+      const input = document.createElement('input')
+      input.type = 'range'
+      input.min = String(min)
+      input.max = String(max)
+      input.step = String(step)
+      input.setAttribute('aria-label', label)
+      input.style.cssText = 'width:96px;accent-color:#7d86ff;cursor:pointer'
+      const value = document.createElement('span')
+      value.style.cssText = 'width:42px;text-align:right;color:#cfd6e6'
+      function sync() {
+        input.value = String(settings[key])
+        value.textContent = format(settings[key])
+        input.setAttribute('aria-valuetext', value.textContent)
+      }
+      input.addEventListener('input', function () {
+        settings[key] = input.valueAsNumber
+        sync()
+        saveSettings(false)
+        deps.refreshBubble()
+      })
+      wrap.append(input, value)
+      settingRow.appendChild(wrap)
+      bubbleControls.push(sync)
+      sync()
+      return settingRow
+    }
+    bubbleSlider('对话字号', 'bubbleFontSize', BUBBLE_FONT_MIN, BUBBLE_FONT_MAX, 1, value => value + ' px')
+    bubbleSlider('气泡大小', 'bubbleScale', BUBBLE_SCALE_MIN, BUBBLE_SCALE_MAX, 0.05, value => Math.round(value * 100) + '%')
+      .title = '调整气泡宽度与留白，文字由对话字号独立控制。'
+    function syncBubbleControls() { bubbleControls.forEach(sync => sync()) }
 
     // 透明度
     var opaRow = row('透明度')
@@ -309,92 +379,7 @@ export function createPanel(deps) {
     previews.addEventListener('toggle', positionPanel)
     panel.appendChild(previews)
 
-    const crt = document.createElement('details')
-    crt.style.cssText = previews.style.cssText
-    const crtHeading = document.createElement('summary')
-    crtHeading.textContent = 'CRT 显示效果'
-    crtHeading.style.cursor = 'pointer'
-    crt.appendChild(crtHeading)
-    const crtControls = document.createElement('fieldset')
-    crtControls.style.cssText = 'min-width:0;border:0;padding:4px 0 0;margin:0'
-    crtControls.disabled = true
-    function crtToggle(label) {
-      const element = document.createElement('label')
-      element.style.cssText = 'display:inline-flex;align-items:center;margin-right:12px;cursor:pointer'
-      const checkbox = document.createElement('input')
-      checkbox.type = 'checkbox'
-      element.append(checkbox, label)
-      crtControls.appendChild(element)
-      return checkbox
-    }
-    const scanlines = crtToggle('扫描线')
-    const vignette = crtToggle('暗角')
-    const dshChrome = crtToggle('DSH 顶栏与渐变')
-    const strengthRow = document.createElement('label')
-    strengthRow.style.cssText = 'display:flex;align-items:center;gap:7px;margin:4px 0'
-    const strength = document.createElement('input')
-    strength.type = 'range'
-    strength.min = '0'
-    strength.max = '150'
-    strength.step = '5'
-    strength.style.cssText = 'width:92px;accent-color:#7d86ff;cursor:pointer'
-    const strengthValue = document.createElement('output')
-    strengthRow.append('强度', strength, strengthValue)
-    crtControls.appendChild(strengthRow)
-    const modes = document.createElement('div')
-    modes.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:4px'
-    for (const [value, text] of [['system', '跟随系统'], ['dark', '深色'], ['light', '浅色']]) {
-      const label = document.createElement('label')
-      label.style.cssText = 'display:inline-flex;align-items:center;cursor:pointer'
-      const radio = document.createElement('input')
-      radio.type = 'radio'
-      radio.name = 'closure-crt-appearance'
-      radio.value = value
-      label.append(radio, text)
-      modes.appendChild(label)
-    }
-    crtControls.appendChild(modes)
-    const crtStatus = document.createElement('div')
-    crtStatus.setAttribute('role', 'status')
-    crtStatus.style.color = '#f1a090'
-    crt.append(crtControls, crtStatus)
-    function syncCrt(value) {
-      scanlines.checked = value.scanlines
-      vignette.checked = value.vignette
-      dshChrome.checked = value.dshChrome
-      strength.value = value.strength
-      strengthValue.textContent = value.strength + '%'
-      modes.querySelector(`input[value="${value.appearance}"]`).checked = true
-    }
-    let savedCrt
-    async function updateCrt(value) {
-      crtControls.disabled = true
-      crtStatus.textContent = ''
-      try {
-        const response = await fetch(PREFIX + '/crt', value ? {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
-        } : { cache: 'no-store' })
-        if (!response.ok) throw new Error('CRT settings unavailable')
-        savedCrt = await response.json()
-      } catch {
-        crtStatus.textContent = value ? '等等，刚调好的显示设置没存进去。' : '咦，显示设置没读出来。'
-      } finally {
-        if (savedCrt) syncCrt(savedCrt)
-        crtControls.disabled = !savedCrt
-        positionPanel()
-      }
-    }
-    strength.addEventListener('input', function () { strengthValue.textContent = strength.value + '%' })
-    crtControls.addEventListener('change', function () {
-      updateCrt({ scanlines: scanlines.checked, vignette: vignette.checked, dshChrome: dshChrome.checked,
-        strength: Number(strength.value), appearance: modes.querySelector('input:checked').value })
-    })
-    crt.addEventListener('toggle', function () {
-      if (crt.open && !savedCrt) updateCrt()
-      positionPanel()
-    })
     if (location.protocol === 'closure-pet:' && !deps.standalone) {
-      panel.appendChild(crt)
       const notifications = document.createElement('details')
       notifications.style.cssText = previews.style.cssText
       const heading = document.createElement('summary')
@@ -463,9 +448,19 @@ export function createPanel(deps) {
     action('完成', function () { closePanel() })
     panel.appendChild(actions)
 
+    if (deps.quit) {
+      const quitButton = document.createElement('button')
+      quitButton.type = 'button'
+      quitButton.textContent = '退出桌宠'
+      quitButton.style.cssText = 'display:block;width:100%;margin-top:8px;padding:5px 8px;border-radius:7px;' +
+        'border:1px solid rgba(255,150,170,.3);background:rgba(255,100,130,.08);color:#ffb8c9;font:inherit;cursor:pointer'
+      quitButton.addEventListener('click', deps.quit)
+      panel.appendChild(quitButton)
+    }
+
     document.body.appendChild(panel)
     syncMirrorButtons()
-    return { syncMirrorButtons, slider, sizeText, syncFps, voiceQueues }
+    return { syncMirrorButtons, slider, sizeText, syncFps, syncBubbleControls, voiceQueues, refreshRuntime }
   }
 
   var panelApi = null
@@ -475,7 +470,9 @@ export function createPanel(deps) {
       panelApi.slider.value = String(settings.size)
       panelApi.sizeText.textContent = Math.round(settings.size * 100) + '%'
       panelApi.syncFps()
+      panelApi.syncBubbleControls()
       panelApi.syncMirrorButtons()
+      panelApi.refreshRuntime()
     }
     panel.style.display = 'block'
     if (panelApi.voiceQueues.menu.open) panelApi.voiceQueues.refresh()

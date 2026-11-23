@@ -19,6 +19,10 @@ export const SIZE_MIN = 0.6
 export const SIZE_MAX = 2.0
 export const FPS_MIN = 30
 export const FPS_MAX = 60
+export const BUBBLE_FONT_MIN = 12
+export const BUBBLE_FONT_MAX = 36
+export const BUBBLE_SCALE_MIN = 0.6
+export const BUBBLE_SCALE_MAX = 1.6
 export const OPACITY_MIN = 0.3
 export const VOICE_LANGUAGES = Object.freeze({ zh: '中文（普通话）', ja: '日语', en: '英语', ko: '韩语' })
 export const STANDALONE_DEFAULT_VOICES = Object.freeze(Object.keys(dialogue))
@@ -28,6 +32,8 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   size: 1,
   fps: FPS_MAX,
   bubble: true,
+  bubbleFontSize: 24,
+  bubbleScale: 1,
   opacity: 1,
   sound: true,
   volume: 0.7,
@@ -66,6 +72,8 @@ export function normalizeSettings(raw, base) {
   if (Number.isFinite(size)) out.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, size))
   if (Number.isFinite(raw.fps)) out.fps = Math.min(FPS_MAX, Math.max(FPS_MIN, Math.round(raw.fps)))
   if (typeof raw.bubble === 'boolean') out.bubble = raw.bubble
+  if (Number.isFinite(raw.bubbleFontSize)) out.bubbleFontSize = Math.min(BUBBLE_FONT_MAX, Math.max(BUBBLE_FONT_MIN, Math.round(raw.bubbleFontSize)))
+  if (Number.isFinite(raw.bubbleScale)) out.bubbleScale = Math.round(Math.min(BUBBLE_SCALE_MAX, Math.max(BUBBLE_SCALE_MIN, raw.bubbleScale)) * 20) / 20
   const opacity = Number(raw.opacity)
   if (Number.isFinite(opacity)) out.opacity = Math.min(1, Math.max(OPACITY_MIN, opacity))
   if (typeof raw.sound === 'boolean') out.sound = raw.sound

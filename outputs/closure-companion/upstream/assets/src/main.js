@@ -25,6 +25,7 @@ import {
   INTERACT_SPLIT, INTERACT_MIX, STARTUP_DELAY, STARTUP_GAP, log, warn,
 } from './core/env.js'
 import { settings, saveSettings } from './core/settings.js'
+import { normalizeSettings } from './shared/protocol.js'
 import { HIT_MASK_W, HIT_MASK_H, HIT_GROW, HIT_FORMS, buildHitMask, maskHit } from './render/hit-test.js'
 import { LOOP_RANGES, LOOP_MODES, THINK_NOD_MIN_MS, THINK_NOD_MAX_MS, HAPPY_CHANCE } from './anim/library.js'
 import { createAudio } from './audio.js'
@@ -39,7 +40,8 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
 (function () {
   if (window.__dshClosurePet) return
   window.__dshClosurePet = { phase: 'boot' }
-  const standalone = new URLSearchParams(location.search).get('mode') === 'standalone'
+  const standalone = new URLSearchParams(location.search).get('codexLinked') === 'false' ||
+    new URLSearchParams(location.search).get('mode') === 'standalone'
 
   // ————————————————————— 设置 —————————————————————
   // settings / loadSettings / saveSettings 见 core/settings.js（加载时已合并 localStorage）
@@ -321,7 +323,10 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
   function onResize() {
     if (window.__dshClosurePet.phase !== 'running') return
     clearTimeout(resizeTimer)
-    resizeTimer = setTimeout(function () { layout(); repositionForAnchor() }, 200)
+    resizeTimer = setTimeout(function () {
+      layout(); repositionForAnchor()
+      if (bubbleApi?.isShown()) refreshBubble()
+    }, 200)
   }
   window.addEventListener('resize', onResize)
 
@@ -466,10 +471,13 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
   // ————————————————————— 组合：创建 UI 实例 —————————————————————
   // 此时函数声明已提升、var 别名都已赋值，依赖全部就绪。
   panelUi = createPanel({
-    standalone, setLaunchMode: window.closureCompanion?.setLaunchMode,
+    standalone, getRuntimeSettings: window.closureCompanion?.getRuntimeSettings,
+    setRuntimeSetting: window.closureCompanion?.setRuntimeSetting,
+    quit: window.closureCompanion?.quit,
     settings: settings, saveSettings: saveSettings, resolveFlip: resolveFlip,
     layout: layout, repositionForAnchor: repositionForAnchor, applyOpacity: applyOpacity,
-    hideBubble: hideBubble, audioEnsure: audioEnsure, loadSounds: loadSounds, playSound: playSound,
+    hideBubble: hideBubble, refreshBubble: () => { if (bubbleApi?.isShown()) refreshBubble() },
+    audioEnsure: audioEnsure, loadSounds: loadSounds, playSound: playSound,
     updateVoice: audio.stopVoice,
     previewVoice: (id) => {
       if (!settings.voice || document.hidden) return Promise.resolve(false)
@@ -482,6 +490,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
   })
   bubbleApi = createBubble({
     standalone,
+    getPetBounds: () => host.getBoundingClientRect(),
     getState: function () { return stateApi ? stateApi.getState() : null }, pet: pet, size: size, settings: settings, audio,
   })
   stickerApi = createSticker({
@@ -499,7 +508,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
   })
   dragApi = createDrag({
     hitTest: hitTest, pet: pet, host: host, clampPos: clampPos, applyPosition: applyPosition,
-    settle: settle, refreshBubble: refreshBubble, playSegment: playSegment,
+    settle: settle, followBubble: bubbleApi.follow, playSegment: playSegment,
     showBubble: bubbleApi.showInteraction, showValleySticker: showValleySticker,
     openPanel: openPanel, closePanel: closePanel, panelIsOpen: panelIsOpen, insidePanel: insidePanel,
   })
@@ -608,19 +617,21 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
         segments: function () { return [segmentRange(0), segmentRange(1)] },
         openPanel: openPanel,
         closePanel: closePanel,
-        get settings() { return { mirror: settings.mirror, size: settings.size, bubble: settings.bubble, opacity: settings.opacity, sound: settings.sound, volume: settings.volume } },
+        get settings() { return { mirror: settings.mirror, size: settings.size, bubble: settings.bubble, bubbleFontSize: settings.bubbleFontSize, bubbleScale: settings.bubbleScale, opacity: settings.opacity, sound: settings.sound, volume: settings.volume } },
         get split() { return INTERACT_SPLIT },
         setSettings: function (patch) {
           if (patch) {
             if (patch.mirror) settings.mirror = patch.mirror
             if (patch.size) settings.size = Number(patch.size)
             if (typeof patch.bubble === 'boolean') settings.bubble = patch.bubble
+            Object.assign(settings, normalizeSettings({ bubbleFontSize: patch.bubbleFontSize, bubbleScale: patch.bubbleScale }, settings))
             if (patch.opacity) settings.opacity = Number(patch.opacity)
             if (typeof patch.sound === 'boolean') settings.sound = patch.sound
             if (patch.volume !== undefined) settings.volume = Number(patch.volume)
           }
           saveSettings(true); layout(); repositionForAnchor(); resolveFlip(); applyOpacity()
           if (!settings.bubble) hideBubble()
+          else if (bubbleApi?.isShown()) refreshBubble()
         },
         resetPosition: resetPosition,
         hitTest: hitTest,

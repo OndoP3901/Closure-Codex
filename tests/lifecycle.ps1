@@ -47,11 +47,80 @@ foreach ($at in 63000,64000,65000,66000,67000,68000,69000) {
     Update-Helpers $children $recovery $at
 }
 Assert-Test ($launches.Count -eq 7 -and $children.Pet -eq $pet) 'Repeated startup failures must stop at the retry limit.'
-Assert-Test ($logs -contains 'Crt exited with code 17 while Codex was open.') 'Record the process exit.'
+Assert-Test ($logs -contains 'Crt exited with code 17.') 'Record the process exit.'
 Assert-Test (($logs -like '*reached its launch limit*').Count -eq 1) 'Record the retry limit once.'
 $pet.ExitCode = 0
 $pet.HasExited = $true
-Update-Helpers $children $recovery 70000 @('Pet') $true
-Update-Helpers $children $recovery 80000 @('Pet') $true
-Assert-Test (!$children.Pet -and $launches.Count -eq 7) 'An intentional standalone exit should stay closed.'
+Update-Helpers $children $recovery 70000 @('Pet')
+Update-Helpers $children $recovery 80000 @('Pet')
+Assert-Test (!$children.Pet -and $launches.Count -eq 7) 'An intentional pet exit should stay closed regardless of Codex linkage.'
+$recovery.Pet = @{ Attempts = 0; Started = 80000; Due = 0 }
+Update-Helpers $children $recovery 80000 @('Pet')
+$children.Pet.HasExited = $true
+Update-Helpers $children $recovery 81000 @('Pet')
+Update-Helpers $children $recovery 82000 @('Pet')
+Assert-Test ($children.Pet -and $launches.Count -eq 9) 'An unexpected pet exit should recover without Codex.'
+
+# Run the real watcher loop body against a simulated sequence of desktop events.
+$loop = $ast.Find({ param($node)
+    $node -is [Management.Automation.Language.DoUntilStatementAst]
+}, $true)
+$bodyText = $loop.Body.Extent.Text
+$tick = [scriptblock]::Create($bodyText.Substring(1, $bodyText.Length - 2))
+function Test-CodexOpen { return $fixture.CodexOpen }
+function Find-OpenHelpers { return @{ Crt = $fixture.LegacyCrt; Pet = $fixture.ManualPet } }
+function Stop-Helpers($children, $keys) {
+    foreach ($key in $keys) {
+        $children[$key].Dispose()
+        $children[$key] = $null
+    }
+}
+$refreshSignal = [pscustomobject]@{ Pending = $false }
+$refreshSignal | Add-Member -MemberType ScriptMethod -Name WaitOne -Value {
+    $pending = $this.Pending
+    $this.Pending = $false
+    return $pending
+}
+$fixture = @{ FailCrt = $false; CodexOpen = $false; ManualPet = $null }
+$clock = [pscustomobject]@{ ElapsedMilliseconds = 0 }
+$children = @{ Crt = $null; Pet = $null }
+$required = @{ Crt = $false; Pet = $false }
+$recovery = @{}
+$lastOpen = $null
+$nextLegacyCheck = 0
+$launches.Clear()
+. $tick
+Assert-Test ($children.Pet -and !$children.Crt -and ($launches -join ',') -eq 'Pet') 'Login without Codex must start the pet only.'
+$desktopPet = $children.Pet
+$fixture.CodexOpen = $true
+$clock.ElapsedMilliseconds = 2000
+. $tick
+Assert-Test (!$children.Crt -and $children.Pet -eq $desktopPet -and $launches.Count -eq 1) 'Opening Codex must not launch the retired overlay.'
+$fixture.CodexOpen = $false
+$clock.ElapsedMilliseconds = 4000
+. $tick
+Assert-Test (!$children.Crt -and $children.Pet -eq $desktopPet) 'Closing Codex stops CRT and keeps the pet running.'
+$desktopPet.HasExited = $true
+$desktopPet.ExitCode = 0
+$clock.ElapsedMilliseconds = 5000
+. $tick
+$clock.ElapsedMilliseconds = 6000
+. $tick
+Assert-Test (!$children.Pet -and $launches.Count -eq 1) 'An explicit pet exit remains closed across watcher ticks.'
+$fixture.ManualPet = Start-Helper 'Pet'
+$refreshSignal.Pending = $true
+. $tick
+Assert-Test ($children.Pet -eq $fixture.ManualPet) 'The watcher adopts a manually reopened pet.'
+$children.Pet.HasExited = $true
+$clock.ElapsedMilliseconds = 7000
+. $tick
+$clock.ElapsedMilliseconds = 8000
+. $tick
+Assert-Test ($children.Pet -and $children.Pet -ne $fixture.ManualPet) 'A manually reopened pet is protected by crash recovery.'
+$protectedPet = $children.Pet
+$fixture.LegacyCrt = [pscustomobject]@{ Disposed = $false }
+$fixture.LegacyCrt | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $this.Disposed = $true }
+$clock.ElapsedMilliseconds = 12000
+. $tick
+Assert-Test ($fixture.LegacyCrt.Disposed -and !$children.Crt -and $children.Pet -eq $protectedPet) 'A leftover legacy overlay must be stopped without affecting the pet.'
 'Lifecycle recovery passed.'

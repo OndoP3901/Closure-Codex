@@ -1,0 +1,6 @@
+/work/
+/dist/
+/production/
+**/node_modules/
+/outputs/closure-companion/.closure-profile/
+*.log

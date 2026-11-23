@@ -6,8 +6,8 @@ const vm = require('node:vm')
 
 const source = readFileSync(path.join(__dirname, '../outputs/closure-companion/main.cjs'), 'utf8')
 const followCodex = source.slice(source.indexOf('function followCodex('), source.indexOf('function registerInput('))
-const tracker = new EventEmitter()
-const lines = new EventEmitter()
+let tracker
+let lines
 const screen = new EventEmitter()
 const win = new EventEmitter()
 let visible = false
@@ -15,9 +15,7 @@ let bounds
 let quit = 0
 let scale = 1
 let trackerStopped = false
-tracker.stderr = new EventEmitter()
-tracker.kill = () => { trackerStopped = true }
-lines.close = () => {}
+let retry
 screen.screenToDipRect = (_window, rect) => ({
   x: rect.x, y: rect.y, width: rect.width / scale, height: rect.height / scale,
 })
@@ -37,18 +35,30 @@ Object.assign(screen, {
   getDisplayMatching: () => display, getDisplayNearestPoint: () => display,
   getCursorScreenPoint: () => ({ x: 0, y: 0 }),
 })
-class Tray {
-  setToolTip() {}
-  setContextMenu() {}
-  destroy() {}
-}
-const switchMode = vm.runInNewContext(`${followCodex}\nmanagePetWindow(win)`, {
-  win, screen, path, __dirname, process, console, noTray: true, Tray, canvas: false,
-  URLSearchParams, origin: 'closure-pet://local', Menu: { buildFromTemplate() {} },
-  spawn: () => tracker, readline: { createInterface: () => lines }, app: { quit: () => { quit++ } },
+const petWindow = vm.runInNewContext(`${followCodex}\nmanagePetWindow(win)`, {
+  win, screen, path, __dirname, process, console, canvas: false,
+  setTimeout: (callback) => { retry = callback; return 1 }, clearTimeout: () => { retry = undefined },
+  URLSearchParams, origin: 'closure-pet://local',
+  spawn: () => {
+    tracker = new EventEmitter()
+    tracker.stderr = new EventEmitter()
+    tracker.kill = () => { trackerStopped = true }
+    lines = new EventEmitter()
+    lines.close = () => {}
+    return tracker
+  }, readline: { createInterface: () => lines }, app: { quit: () => { quit++ } },
 })
 async function checkWindow() {
-  await switchMode('codex')
+  await petWindow.setShowOutsideCodex(true)
+  await petWindow.setLinked(false)
+  assert.equal(visible, true, 'the default desktop pet needs no Codex window')
+  assert.deepEqual(bounds, display.workArea)
+  await petWindow.setLinked(true)
+  assert.equal(visible, true, 'enabling activity linkage keeps the desktop pet visible')
+  assert.deepEqual(bounds, display.workArea, 'activity linkage does not move the desktop window')
+  assert.equal(tracker, undefined, 'activity linkage alone does not start window following')
+  await petWindow.setShowOutsideCodex(false)
+  assert.equal(visible, false, 'only the display option restricts the pet to Codex')
   const report = (state) => lines.emit('line', JSON.stringify(state))
   const main = { visible: true, x: 0, y: 0, width: 1200, height: 800 }
   report(main)
@@ -67,24 +77,55 @@ async function checkWindow() {
   scale = 2
   screen.emit('display-metrics-changed')
   assert.equal(bounds.width, 600)
-  await switchMode('standalone')
+  const oldTracker = tracker
+  await petWindow.setLinked(false)
+  assert.equal(trackerStopped, false, 'disabling activity linkage leaves window following unchanged')
+  assert.equal(bounds.width, 600)
+  report({ visible: false })
+  assert.equal(visible, false, 'Codex-only display works even without activity linkage')
+  await petWindow.setShowOutsideCodex(true)
   assert.equal(trackerStopped, true)
   assert.equal(visible, true)
   assert.deepEqual(bounds, display.workArea)
   report({ visible: false })
-  tracker.emit('close')
+  oldTracker.emit('close')
   assert.equal(visible, true)
   assert.equal(quit, 0)
-  await switchMode('codex')
+  await petWindow.setLinked(true)
+  assert.equal(visible, true, 'linkage does not override the outside-Codex display preference')
+  await petWindow.setShowOutsideCodex(false)
   assert.equal(visible, false)
   report(main)
   assert.equal(visible, true)
   tracker.emit('close')
   assert.equal(visible, false)
-  assert.equal(quit, 1)
+  assert.equal(quit, 0, 'tracker loss must not exit the pet')
+  assert.ok(retry, 'a failed tracker is restarted')
+  retry()
+  report(main)
+  assert.equal(visible, true)
+  await petWindow.setLinked(false)
+  assert.equal(visible, true)
+  await petWindow.setShowOutsideCodex(true)
+  assert.equal(visible, true)
   win.emit('closed')
   assert.equal(trackerStopped, true)
   assert.equal(screen.listenerCount('display-metrics-changed'), 0)
-  console.log('Window following, DPI conversion, standalone switching, and tracker failure passed.')
+  assert.equal(retry, undefined)
 }
-require('node:test').test('desktop pet window switches modes', checkWindow)
+require('node:test').test('Codex linkage and display scope stay independent without a tray', checkWindow)
+
+require('node:test').test('right-click quit accepts only the pet main frame', () => {
+  const ipcMain = new EventEmitter()
+  const webContents = { mainFrame: {} }
+  let exits = 0
+  const register = source.slice(source.indexOf('function registerExit('), source.indexOf('function registerRuntimeSettings('))
+  vm.runInNewContext(`${register}\nregisterExit(win)`, {
+    ipcMain, win: { webContents }, app: { quit: () => { exits++ } },
+  })
+  ipcMain.emit('closure:quit', { sender: {}, senderFrame: webContents.mainFrame })
+  ipcMain.emit('closure:quit', { sender: webContents, senderFrame: {} })
+  assert.equal(exits, 0)
+  ipcMain.emit('closure:quit', { sender: webContents, senderFrame: webContents.mainFrame })
+  assert.equal(exits, 1)
+})

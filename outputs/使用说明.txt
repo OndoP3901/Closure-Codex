@@ -1,3 +1,15 @@
-可露希尔 · Codex Windows 移植
+可露希尔 · Codex Windows 移植 v0.6.0
 
-安装、主题导入、桌宠设置与卸载步骤见上一级目录的 README.md。
+安装、主题启用、桌宠设置与卸载步骤见上一级目录的 README.md。
+
+一键启用当前 Codex 深色主题：双击上一级目录的 Enable-Codex-Theme.vbs，全程隐藏终端。
+首次请先正常打开 Microsoft Store 版 Codex；脚本识别并保存原配置，首次接入普通窗口重启一次。
+自动沿用原账号和聊天，加载配色、字体、顶部菜单栏与 CRT，无需手动导入。
+后续使用创建的“Codex - 可露希尔深色主题”快捷方式直接启动，即使完全退出后也不再重启。
+恢复原外观：双击上一级目录的 Restore-Codex-Appearance.vbs。
+启动失败时会显示错误和日志位置；上一级 tools 文件夹中的 CMD 加 --debug 参数可查看控制台输出。
+
+桌宠由 Install.cmd 安装；手动启动使用 outputs/Start-Closure.cmd。
+右键菜单分别控制 Codex 联动、桌面和其他软件显示、开机自启，底部可退出桌宠。
+「对话字号」可调 12–36 px，「气泡大小」可调 60%–160%，两项独立保存并即时生效。
+work/companion-profile 是个人桌宠设置，work/companion-runtime 是运行时，请勿当作缓存删除。

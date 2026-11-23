@@ -1,8 +1,18 @@
-param([switch] $Stop, [switch] $Probe, [switch] $NoActivity)
+param([switch] $Stop, [switch] $Probe, [switch] $NoActivity, [switch] $Refresh)
 
 $ErrorActionPreference = 'Stop'
 $mutexName = 'Local\ClosureCodexLifecycle.v1'
 $stopName = 'Local\ClosureCodexLifecycle.Stop.v1'
+$refreshName = 'Local\ClosureCodexLifecycle.Refresh.v1'
+if ($Refresh) {
+    $refreshSignal = $null
+    try { $refreshSignal = [Threading.EventWaitHandle]::OpenExisting($refreshName) }
+    catch [Threading.WaitHandleCannotBeOpenedException] { }
+    if ($refreshSignal) {
+        try { [void]$refreshSignal.Set() } finally { $refreshSignal.Dispose() }
+        return
+    }
+}
 if ($Stop) {
     try { $signal = [Threading.EventWaitHandle]::OpenExisting($stopName) }
     catch [Threading.WaitHandleCannotBeOpenedException] { return }
@@ -87,7 +97,6 @@ $workRoot = [IO.Path]::GetFullPath((Join-Path $outputRoot '../work'))
 $crtExe = Join-Path $outputRoot 'closure-crt/ClosureCrt.exe'
 $petApp = Join-Path $outputRoot 'closure-companion'
 $electronExe = Join-Path $workRoot 'companion-runtime/electron/electron.exe'
-$launchModePath = Join-Path $workRoot 'companion-profile/launch-mode.txt'
 $knownProcesses = @{}
 
 function Test-CodexOpen {
@@ -125,12 +134,12 @@ function Find-OpenHelpers {
 
 function Start-Helper($key) {
     if ($key -eq 'Crt') {
-        return Start-Process -FilePath $crtExe -ArgumentList '--no-tray' -WindowStyle Hidden -PassThru
+        throw 'The external CRT overlay has been retired.'
     }
     $env:CLOSURE_STATE_DIR = Join-Path $workRoot 'companion-profile'
     Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-    $arguments = '"' + $petApp + '" --no-tray'
-    if (!$NoActivity) { $arguments += ' --follow-activity' }
+    $arguments = '"' + $petApp + '"'
+    # Legacy -NoActivity is accepted on old shortcuts; the saved linkage checkbox now decides activity.
     return Start-Process -FilePath $electronExe -ArgumentList $arguments -WindowStyle Hidden -PassThru
 }
 
@@ -144,7 +153,7 @@ function Write-LifecycleLog($message) {
     } catch { Write-Verbose 'Could not write the lifecycle log.' }
 }
 
-function Update-Helpers($children, $recovery, [long] $now, $keys = @('Crt', 'Pet'), [bool] $standalone = $false) {
+function Update-Helpers($children, $recovery, [long] $now, $keys = @('Crt', 'Pet')) {
     foreach ($key in $keys) {
         $state = $recovery[$key]
         $process = $children[$key]
@@ -154,14 +163,10 @@ function Update-Helpers($children, $recovery, [long] $now, $keys = @('Crt', 'Pet
                 continue
             }
             $code = try { $process.ExitCode } catch [InvalidOperationException] { 'unknown' }
-            if ($key -eq 'Pet' -and $standalone) {
-                Write-LifecycleLog "$key exited with code $code in standalone mode."
-            } else {
-                Write-LifecycleLog "$key exited with code $code while Codex was open."
-            }
+            Write-LifecycleLog "$key exited with code $code."
             $process.Dispose()
             $children[$key] = $null
-            if ($key -eq 'Pet' -and $standalone -and $code -eq 0) { $state.Due = [long]::MaxValue }
+            if ($key -eq 'Pet' -and $code -eq 0) { $state.Due = [long]::MaxValue }
             else { $state.Due = $now + 1000 }
         }
         if ($state.Attempts -ge 4 -or $now -lt $state.Due) { continue }
@@ -204,43 +209,45 @@ if ($Probe) {
 $mutex = [Threading.Mutex]::new($false, $mutexName)
 $ownsMutex = $false
 $signal = $null
+$refreshSignal = $null
 $children = @{ Crt = $null; Pet = $null }
 try {
     try { $ownsMutex = $mutex.WaitOne(0) }
     catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
     if (!$ownsMutex) { return }
     $signal = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $stopName)
+    $refreshSignal = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::AutoReset, $refreshName)
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    $lastOpen = $null
     $required = @{ Crt = $false; Pet = $false }
     $recovery = @{}
-    $previousStandalone = $false
+    $nextLegacyCheck = 0
     do {
         $now = $clock.ElapsedMilliseconds
-        if (Test-CodexOpen) { $lastOpen = $now }
-        $codexOpen = $null -ne $lastOpen -and $now - $lastOpen -lt 1500
-        $standalone = $previousStandalone
-        try {
-            $standalone = [IO.File]::ReadAllText($launchModePath).Trim() -eq 'standalone'
-        } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
-            $standalone = $false
-        } catch [IO.IOException] {
-            # Use the last mode if the settings file is temporarily unavailable.
+        # A manually reopened pet asks an existing watcher to resume supervising it.
+        if ($refreshSignal.WaitOne(0) -and (!$children.Pet -or $children.Pet.HasExited)) {
+            if ($children.Pet) { $children.Pet.Dispose() }
+            $children.Pet = (Find-OpenHelpers).Pet
+            $recovery.Pet = @{ Attempts = [int][bool]$children.Pet; Started = $now; Due = 0 }
+            $required.Pet = $true
         }
-        $needed = @{ Crt = $codexOpen; Pet = $codexOpen -or $standalone }
+        # Keep the old helper slot for upgrade cleanup, but never launch an overlay.
+        $needed = @{ Crt = $false; Pet = $true }
+        if (!$children.Crt -and $now -ge $nextLegacyCheck) {
+            $children.Crt = (Find-OpenHelpers).Crt
+            $nextLegacyCheck = $now + 3000
+        }
         foreach ($key in 'Crt', 'Pet') {
             if (!$needed[$key]) {
                 if ($children[$key]) { Stop-Helpers $children @($key) }
             } else {
-                if (!$required[$key] -or ($key -eq 'Pet' -and $standalone -ne $previousStandalone)) {
+                if (!$required[$key]) {
                     if (!$children[$key]) { $children[$key] = (Find-OpenHelpers)[$key] }
                     $recovery[$key] = @{ Attempts = [int][bool]$children[$key]; Started = $now; Due = 0 }
                 }
-                Update-Helpers $children $recovery $now @($key) $standalone
+                Update-Helpers $children $recovery $now @($key)
             }
             $required[$key] = $needed[$key]
         }
-        $previousStandalone = $standalone
     } until ($signal.WaitOne(350))
 } finally {
     if ($ownsMutex) {
@@ -252,6 +259,7 @@ try {
         }
         Stop-Helpers $children
         if ($signal) { $signal.Dispose() }
+        if ($refreshSignal) { $refreshSignal.Dispose() }
         $mutex.ReleaseMutex()
     }
     $mutex.Dispose()

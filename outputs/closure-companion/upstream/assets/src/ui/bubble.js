@@ -7,7 +7,7 @@
 import { PREFIX } from '../core/env.js'
 
 import { dialogue } from '../core/dialogue.js'
-import { getStandaloneVoiceQueue, getVoiceQueues } from '../shared/protocol.js'
+import { BUBBLE_FONT_MIN, normalizeSettings, getStandaloneVoiceQueue, getVoiceQueues } from '../shared/protocol.js'
 import { createVoiceRotation } from '../core/voice-rotation.js'
 
 export function quotaLines(state) {
@@ -45,8 +45,7 @@ export function createBubble(deps) {
   // 结构：一个 fixed 容器里放「SVG 背景（像素边框 + 硬阴影）+ 文本层」，
   // 文本用 Ark Pixel 12px 像素字体；整体 pointer-events:none，不挡下面 UI。
   var BUBBLE_FONT = '"ArkPixel12", ui-monospace, monospace'
-  // 像素字体是 12px 设计的矢量轮廓：只有按整数倍渲染才严格清晰，
-  // 所以用 24px（2×）—— 16px 那种 1.33× 会出现粗细不均。
+  // 默认 24px（像素字体的 2×）；字号与气泡宽度/留白可独立调整。
   var BUBBLE_SIZE = 24
   var BUBBLE_LINE = 28
   var BUBBLE_PAD = 12
@@ -62,8 +61,18 @@ export function createBubble(deps) {
   var bubbleH = 0
   var bubbleHideTimer = 0
   var bubbleTickTimer = 0
+  var bubbleFollowRaf = 0
+  var bubbleFollowUntil = 0
+  var bubbleFrameKey = ''
+
+  function stopFollowing() {
+    if (bubbleFollowRaf) cancelAnimationFrame(bubbleFollowRaf)
+    bubbleFollowRaf = 0
+    bubbleFollowUntil = 0
+  }
 
   function hideBubble() {
+    stopFollowing()
     bubbleShown = false
     taskDialogueShown = false
     bubbleEventUntil = 0
@@ -127,7 +136,7 @@ export function createBubble(deps) {
     document.body.appendChild(bubbleEl)
   }
 
-  var BUBBLE_MAX_W = 330 // 单行最大宽度（CSS px），超出按字符折行
+  var BUBBLE_MAX_W = 330 // 单行最大宽度（CSS px），按气泡大小与屏幕空间调整
 
   function measureText(text) {
     var cv = measureText._cv || (measureText._cv = document.createElement('canvas'))
@@ -187,24 +196,39 @@ export function createBubble(deps) {
   function renderBubble(lines, tailCenterX, tailUp) {
     ensureFont()
     ensureBubble()
+    const appearance = normalizeSettings({ bubbleFontSize: settings.bubbleFontSize, bubbleScale: settings.bubbleScale })
+    BUBBLE_PAD = Math.round(12 * appearance.bubbleScale)
+    BUBBLE_CORNER = Math.max(4, Math.round(6 * appearance.bubbleScale))
+    TAIL_W = Math.max(8, Math.round(14 * appearance.bubbleScale))
+    TAIL_H = Math.max(6, Math.round(10 * appearance.bubbleScale))
+    BUBBLE_SIZE = appearance.bubbleFontSize
+    BUBBLE_MAX_W = Math.max(BUBBLE_FONT_MIN, Math.min(330 * appearance.bubbleScale,
+      window.innerWidth - 16 - 6 - 4 - BUBBLE_PAD * 2))
     // 折行规则：
     //   1) 文本里**显式写的 `\n` 优先作为硬换行**（调用方自己控制分行）；
     //   2) 每段再按像素宽度软折行，避免单行把气泡拉得过宽。
     // 之前没有第 1 步：`\n` 被当成普通字符参与测量，整句按宽度硬切，
     // 于是"第二段"开头又被切一次，看起来像多空了一行。
-    var wrapped = []
-    for (var li = 0; li < lines.length; li++) {
-      var segments = String(lines[li]).split(/\r?\n/)
-      for (var si = 0; si < segments.length; si++) {
-        var parts = wrapText(segments[si], BUBBLE_MAX_W)
-        for (var pi = 0; pi < parts.length; pi++) wrapped.push(parts[pi])
+    var wrapped, h
+    do {
+      BUBBLE_LINE = Math.ceil(BUBBLE_SIZE * 7 / 6)
+      wrapped = []
+      for (var li = 0; li < lines.length; li++) {
+        var segments = String(lines[li]).split(/\r?\n/)
+        for (var si = 0; si < segments.length; si++) {
+          var parts = wrapText(segments[si], BUBBLE_MAX_W)
+          for (var pi = 0; pi < parts.length; pi++) wrapped.push(parts[pi])
+        }
       }
-    }
+      h = wrapped.length * BUBBLE_LINE + BUBBLE_PAD * 2 + TAIL_H
+      // Only reduce the displayed font when the requested layout cannot fit on screen.
+      if (h + 6 <= window.innerHeight - 16 || BUBBLE_SIZE <= BUBBLE_FONT_MIN) break
+      BUBBLE_SIZE--
+    } while (true)
     lines = wrapped
     var widest = 0
     for (var i = 0; i < lines.length; i++) widest = Math.max(widest, measureText(lines[i]))
     var w = Math.ceil(widest) + BUBBLE_PAD * 2 + 4
-    var h = lines.length * BUBBLE_LINE + BUBBLE_PAD * 2 + TAIL_H
     // 对齐到偶数像素，保证像素边缘清晰
     w = Math.ceil(w / 2) * 2
     h = Math.ceil(h / 2) * 2
@@ -214,10 +238,25 @@ export function createBubble(deps) {
     bubbleEl.style.width = (w + 6) + 'px'
     bubbleEl.style.height = (h + 6) + 'px'
 
+    drawBubbleFrame(tailCenterX, tailUp)
+    bubbleTextEl.style.fontSize = BUBBLE_SIZE + 'px'
+    bubbleTextEl.style.lineHeight = BUBBLE_LINE + 'px'
+    bubbleTextEl.style.left = (BUBBLE_PAD + 2) + 'px'
+    bubbleTextEl.textContent = lines.join('\n')
+  }
+
+  // Moving the bubble only changes its frame and tail, never text measurement or wrapping.
+  function drawBubbleFrame(tailCenterX, tailUp) {
+    var w = bubbleW
+    var h = bubbleH
+    bubbleTextEl.style.top = ((tailUp ? TAIL_H : 0) + BUBBLE_PAD + 1) + 'px'
     var tailX = Math.round(Math.min(
       Math.max(8, (tailCenterX || w / 2) - TAIL_W / 2),
       w - TAIL_W - 8,
     ))
+    var key = [w, h, tailX, !!tailUp, BUBBLE_CORNER, TAIL_W, TAIL_H].join(':')
+    if (key === bubbleFrameKey) return
+    bubbleFrameKey = key
     bubbleSvg.setAttribute('width', String(w + 6))
     bubbleSvg.setAttribute('height', String(h + 6))
     bubbleSvg.setAttribute('viewBox', `0 0 ${w + 6} ${h + 6}`)
@@ -225,9 +264,6 @@ export function createBubble(deps) {
       '<path d="' + bubblePath(w, h, tailX, tailUp) + '" fill="#000" fill-opacity=".32" transform="translate(3,3)"/>' +
       '<path d="' + bubblePath(w, h, tailX, tailUp) + '" fill="#ffffff" stroke="#20232a" stroke-width="2"/>'
 
-    bubbleTextEl.style.left = (BUBBLE_PAD + 2) + 'px'
-    bubbleTextEl.style.top = ((tailUp ? TAIL_H : 0) + BUBBLE_PAD + 1) + 'px'
-    bubbleTextEl.textContent = lines.join('\n')
   }
 
   function fmtMoney(value, currency) {
@@ -283,15 +319,16 @@ export function createBubble(deps) {
   function placeBubble() {
     if (!bubbleEl || !pet.pos) return { tailCenter: bubbleW / 2, below: false }
     var s = size()
-    var centerX = pet.pos.x + s.w / 2
+    var bounds = deps.getPetBounds ? deps.getPetBounds() : { left: pet.pos.x, top: pet.pos.y, width: s.w, height: s.h }
+    var centerX = bounds.left + bounds.width / 2
     // 尾巴不放在正中：气泡主体朝屏幕内侧展开，尾巴落在宽度的 32% / 68% 处
     var ratio = centerX < window.innerWidth / 2 ? 0.32 : 0.68
     var left = Math.round(centerX - bubbleW * ratio)
-    left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - bubbleW - 8))
-    var top = Math.round(pet.pos.y - bubbleH - 2)
+    left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - bubbleW - 6 - 8))
+    var top = Math.round(bounds.top - bubbleH - 2)
     var below = top < 8
-    if (below) top = Math.round(pet.pos.y + s.h + 2)
-    top = Math.min(Math.max(8, top), Math.max(8, window.innerHeight - bubbleH - 8))
+    if (below) top = Math.round(bounds.top + bounds.height + 2)
+    top = Math.min(Math.max(8, top), Math.max(8, window.innerHeight - bubbleH - 6 - 8))
     bubbleEl.style.left = left + 'px'
     bubbleEl.style.top = top + 'px'
     // 弹出动画的轴心：在桌宠上方时用底边，翻到下方时用顶边
@@ -313,9 +350,22 @@ export function createBubble(deps) {
     // 1) 先按占位尾巴量出尺寸；2) 用真实尺寸判定上下/左右；3) 用正确尾巴重画再落位
     renderBubble(lines, 0, false)
     var pos = placeBubble()
-    renderBubble(lines, pos.tailCenter, pos.below)
-    placeBubble()
+    drawBubbleFrame(pos.tailCenter, pos.below)
     return true
+  }
+
+  function followBubble(duration = 0) {
+    if (!bubbleShown || !bubbleEl || !pet.pos) return
+    // During edge snapping, follow the rendered position throughout the CSS transition.
+    bubbleFollowUntil = Math.max(bubbleFollowUntil, performance.now() + duration)
+    if (bubbleFollowRaf) return
+    bubbleFollowRaf = requestAnimationFrame(function follow(now) {
+      bubbleFollowRaf = 0
+      if (!bubbleShown || !bubbleEl || !pet.pos) return
+      var pos = placeBubble()
+      drawBubbleFrame(pos.tailCenter, pos.below)
+      if (now < bubbleFollowUntil) bubbleFollowRaf = requestAnimationFrame(follow)
+    })
   }
 
   // 气泡显隐动画：像从桌宠头顶"冒"出来（底部为轴心），带一点回弹
@@ -335,6 +385,7 @@ export function createBubble(deps) {
   }
 
   function popBubbleOut() {
+    stopFollowing()
     if (!bubbleEl) return
     try {
       bubbleEl.getAnimations().forEach(function (a) { a.cancel() })
@@ -441,7 +492,8 @@ export function createBubble(deps) {
     bubbleTextEl = null
     bubbleTailEl = null
     bubbleSvg = null
+    bubbleFrameKey = ''
   }
 
-  return { show: showBubble, showDialogue, showQuota: showQuota, showInteraction: showInteraction, refresh: refreshBubble, hide: hideBubble, dispose: dispose, isShown: function () { return bubbleShown } }
+  return { show: showBubble, showDialogue, showQuota: showQuota, showInteraction: showInteraction, refresh: refreshBubble, follow: followBubble, hide: hideBubble, dispose: dispose, isShown: function () { return bubbleShown } }
 }

@@ -2,7 +2,7 @@
 //
 // 拖动时冻结页面其它交互：命中 pointerdown 就 preventDefault + stopImmediatePropagation，
 // 按下期间拦住 mousedown/selectstart/dragstart，铺透明挡板，松手吞掉合成 click。
-// 依赖注入：hitTest / pet / host / clampPos / applyPosition / settle / refreshBubble /
+// 依赖注入：hitTest / pet / host / clampPos / applyPosition / settle / followBubble /
 // playSegment / showBubble / showValleySticker / openPanel / closePanel / panelIsOpen / insidePanel。
 
 import { DRAG_THRESHOLD_SQ } from '../core/env.js'
@@ -14,7 +14,7 @@ export function createDrag(deps) {
   var clampPos = deps.clampPos
   var applyPosition = deps.applyPosition
   var settle = deps.settle
-  var refreshBubble = deps.refreshBubble
+  var followBubble = deps.followBubble
   var playSegment = deps.playSegment
   var showBubble = deps.showBubble
   var showValleySticker = deps.showValleySticker
@@ -147,6 +147,7 @@ export function createDrag(deps) {
     if (!drag.moved) return
     pet.pos = clampPos(drag.originX + dx, drag.originY + dy)
     applyPosition()
+    followBubble()
   }, true)
 
   function endDrag(e) {
@@ -160,7 +161,7 @@ export function createDrag(deps) {
     swallowClick = !(e && e.type === 'pointercancel')
     if (passive) return
     host.style.transition = 'opacity .35s ease'
-    if (wasDrag) { settle(); refreshBubble() }
+    if (wasDrag) { settle(); followBubble(260) }
     else {
       const startSegment = !pet.segment
       if (startSegment) playSegment()
@@ -176,7 +177,7 @@ export function createDrag(deps) {
     drag = null
     endDragLock()
     host.style.transition = 'opacity .35s ease'
-    if (wasDrag) { settle(); refreshBubble() }
+    if (wasDrag) { settle(); followBubble(260) }
   }
 
   listen(window, 'pointerup', endDrag, true)
