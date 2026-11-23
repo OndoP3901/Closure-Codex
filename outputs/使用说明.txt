@@ -1,3 +1,6 @@
 可露希尔 · Codex Windows 移植
 
 安装、主题导入、桌宠设置与卸载步骤见上一级目录的 README.md。
+默认安装只添加独立桌宠，不修改 Codex 主题和界面。
+双击桌面的「可露希尔桌宠」快捷方式即可单独启动。
+也可以使用 Start-Pet.cmd 或 outputs\Start-Closure.cmd 作为便携入口。

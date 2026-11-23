@@ -2,6 +2,8 @@ param(
     [switch] $Uninstall,
     [ValidateSet('Dark', 'Light')] [string] $CopyTheme,
     [string] $StartupFolder = [Environment]::GetFolderPath('Startup'),
+    [string] $ShortcutFolder = [Environment]::GetFolderPath('Desktop'),
+    [switch] $SkipShortcut,
     [switch] $SkipStart
 )
 
@@ -16,20 +18,43 @@ $autostart = Join-Path $PSScriptRoot 'outputs/closure-autostart'
 $config = Join-Path $autostart 'Configure.ps1'
 $watcher = Join-Path $autostart 'Watch-Codex.ps1'
 $shortcutPath = Join-Path $StartupFolder 'Closure Codex Lifecycle.lnk'
+$petApp = Join-Path $PSScriptRoot 'outputs/closure-companion'
+$electronExe = Join-Path $PSScriptRoot 'work/companion-runtime/electron/electron.exe'
+$petIcon = Join-Path $petApp 'upstream/icon.ico'
+$petShortcutPath = if ($ShortcutFolder) { Join-Path $ShortcutFolder '可露希尔桌宠.lnk' }
 $shell = New-Object -ComObject WScript.Shell
 $previous = if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) { $shell.CreateShortcut($shortcutPath) }
 $registration = @{ StartupFolder = $StartupFolder; SkipStart = $SkipStart }
 
+function Remove-PetShortcut {
+    if (!$petShortcutPath -or !(Test-Path -LiteralPath $petShortcutPath -PathType Leaf)) { return }
+    $shortcut = $shell.CreateShortcut($petShortcutPath)
+    if ($shortcut.TargetPath -ne $electronExe) { return }
+    Remove-Item -LiteralPath $petShortcutPath -Force
+}
+
+function Install-PetShortcut {
+    if ($SkipShortcut -or !$petShortcutPath) { return }
+    if (!(Test-Path -LiteralPath $electronExe -PathType Leaf)) { throw "Missing Closure component: $electronExe" }
+    New-Item -ItemType Directory -Path $ShortcutFolder -Force | Out-Null
+    $shortcut = $shell.CreateShortcut($petShortcutPath)
+    $shortcut.TargetPath = $electronExe
+    $shortcut.Arguments = '"' + $petApp + '" --standalone'
+    $shortcut.WorkingDirectory = $petApp
+    $shortcut.WindowStyle = 1
+    $shortcut.IconLocation = if (Test-Path -LiteralPath $petIcon -PathType Leaf) { "$petIcon,0" } else { "$electronExe,0" }
+    $shortcut.Description = 'Start the Closure desktop pet in standalone mode.'
+    $shortcut.Save()
+}
+
 if ($Uninstall) {
+    Remove-PetShortcut
     if ($previous -and $previous.Arguments -like ('*"' + [WildcardPattern]::Escape($watcher) + '"*')) {
         & $config @registration -Disable
     }
     return
 }
 
-if (!(Get-AppxPackage -Name OpenAI.Codex)) {
-    throw 'Install the Microsoft Store version of Codex for Windows first.'
-}
 if ([Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITECTURE') -ne 'AMD64' -and
     [Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITEW6432') -ne 'AMD64') {
     throw 'This release requires Windows x64.'
@@ -56,4 +81,9 @@ try {
     }
     throw
 }
-Write-Output 'Closure Codex is registered for this Windows user.'
+try {
+    Install-PetShortcut
+} catch {
+    Write-Warning "Could not create the desktop shortcut: $($_.Exception.Message)"
+}
+Write-Output 'Closure desktop pet is registered for this Windows user.'

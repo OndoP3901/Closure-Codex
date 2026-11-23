@@ -20,7 +20,7 @@ if ($Disable) {
 
 $outputs = Split-Path -Parent $PSScriptRoot
 $workspace = Split-Path -Parent $outputs
-foreach ($item in (Join-Path $outputs 'closure-crt/ClosureCrt.exe'), (Join-Path $outputs 'closure-companion/main.cjs'), (Join-Path $workspace 'work/companion-runtime/electron/electron.exe')) {
+foreach ($item in (Join-Path $outputs 'closure-companion/main.cjs'), (Join-Path $workspace 'work/companion-runtime/electron/electron.exe')) {
     if (!(Test-Path -LiteralPath $item -PathType Leaf)) { throw "Missing Closure component: $item" }
 }
 
@@ -32,6 +32,6 @@ $shortcut.TargetPath = $powershell
 $shortcut.Arguments = $arguments
 $shortcut.WorkingDirectory = $PSScriptRoot
 $shortcut.WindowStyle = 7
-$shortcut.Description = 'Start and stop Closure CRT and the desktop pet with Codex.'
+$shortcut.Description = 'Start the Closure desktop pet. Codex themes and windows are not modified.'
 $shortcut.Save()
 if (!$SkipStart) { Start-Process -FilePath $powershell -ArgumentList $arguments -WindowStyle Hidden }

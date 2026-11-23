@@ -13,8 +13,9 @@ const demo = process.argv.includes('--demo')
 const smoke = process.argv.includes('--smoke')
 const canvas = process.argv.includes('--canvas')
 const noTray = process.argv.includes('--no-tray')
+const forceStandalone = process.argv.includes('--standalone')
 const dev = demo || smoke
-const profile = process.env.CLOSURE_STATE_DIR || path.join(__dirname, '.closure-profile')
+const profile = process.env.CLOSURE_STATE_DIR || path.resolve(__dirname, '../../work/companion-profile')
 const assets = path.join(__dirname, 'upstream', 'assets')
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
 const crtSettingsPath = process.env.CLOSURE_CRT_SETTINGS_FILE || path.resolve(__dirname, '../../work/crt-settings.ini')
@@ -66,6 +67,13 @@ async function updateCrt(request) {
   crtWrite = task.catch(() => {})
   await task
   return Response.json(value)
+}
+
+async function writeLaunchMode(value) {
+  await mkdir(profile, { recursive: true })
+  const temporary = `${launchModePath}.${process.pid}.tmp`
+  await writeFile(temporary, value + '\n', 'utf8')
+  await rename(temporary, launchModePath)
 }
 
 function registerProtocol(getActivityState) {
@@ -294,6 +302,32 @@ async function runSmoke(win) {
     const dragged = after.left < before.left - 30 && after.top < before.top - 25
     pet.resetPosition()
     await new Promise((done) => setTimeout(done, 260))
+    pet.setSettings({ dragLock: true })
+    await new Promise((done) => setTimeout(done, 300))
+    const lockedBefore = screenPet.getBoundingClientRect()
+    pointer('pointerdown', point.x, point.y)
+    pointer('pointermove', point.x - 70, point.y - 50)
+    pointer('pointerup', point.x - 70, point.y - 50)
+    await new Promise((done) => setTimeout(done, 200))
+    const lockedAfter = screenPet.getBoundingClientRect()
+    const dragLockWorks = pet.settings.dragLock === true &&
+      Math.abs(lockedAfter.left - lockedBefore.left) < 1 && Math.abs(lockedAfter.top - lockedBefore.top) < 1
+    pet.setSettings({ dragLock: false })
+    await new Promise((done) => setTimeout(done, 100))
+    const lockIcon = document.querySelector('[data-closure-ui="lock"]')
+    const hostRect = document.querySelector('#dsh-closure-pet').getBoundingClientRect()
+    pet.setHover(hostRect.left + 2, hostRect.top + 2)
+    const lockShown = lockIcon.style.opacity === '1' && lockIcon.style.pointerEvents === 'auto'
+    const lockRect = lockIcon.getBoundingClientRect()
+    const lockTarget = document.elementFromPoint(lockRect.left + lockRect.width / 2, lockRect.top + lockRect.height / 2)
+    const lockClickable = Boolean(lockTarget && lockTarget.closest('[data-closure-ui]'))
+    lockIcon.click()
+    const lockIconOn = pet.settings.dragLock === true && lockIcon.getAttribute('aria-pressed') === 'true'
+    lockIcon.click()
+    const lockIconOff = pet.settings.dragLock === false && lockIcon.getAttribute('aria-pressed') === 'false'
+    pet.setHover(-200, -200)
+    const lockHidden = lockIcon.style.opacity === '0' && lockIcon.style.pointerEvents === 'none'
+    const hoverLockWorks = lockShown && lockClickable && lockIconOn && lockIconOff && lockHidden
     const click = (target = point) => {
       pointer('pointerdown', target.x, target.y)
       pointer('pointerup', target.x, target.y)
@@ -335,6 +369,14 @@ async function runSmoke(win) {
     const settings = document.querySelector('#dsh-closure-pet-settings')
     const panelOpened = getComputedStyle(settings).display === 'block'
     const getSavedSettings = () => JSON.parse(localStorage.getItem('dshcl-settings'))
+    const lockButton = [...settings.querySelectorAll('button')].find((button) => button.title.includes('拖动桌宠'))
+    const dragLockButton = Boolean(lockButton) && lockButton.textContent === '未锁定' &&
+      lockButton.getAttribute('aria-pressed') === 'false'
+    if (!dragLockButton) throw new Error('防误触锁定 button missing')
+    lockButton.click()
+    const dragLockButtonOn = lockButton.textContent === '已锁定' && getSavedSettings().dragLock === true
+    lockButton.click()
+    const dragLockButtonOff = lockButton.textContent === '未锁定' && getSavedSettings().dragLock === false
     const fpsSlider = settings.querySelector('input[type="range"][aria-label="帧率"]')
     const { normalizeSettings } = await import('/dsh-closure/assets/src/shared/protocol.js')
     const fpsRange = fpsSlider.min === '30' && fpsSlider.max === '60' && fpsSlider.step === '1' &&
@@ -612,7 +654,8 @@ async function runSmoke(win) {
       Date.now = now
     }
     defaultMode.click()
-    return { dragged, clicked, panelOpened, fpsSliderWorks, notificationsSaved, defaultQueues, defaultOverridesPersonal, queueEditor, voiceSettings, voiceVolumeWorks,
+    return { dragged, dragLockWorks, hoverLockWorks, dragLockButton: dragLockButton && dragLockButtonOn && dragLockButtonOff,
+      clicked, panelOpened, fpsSliderWorks, notificationsSaved, defaultQueues, defaultOverridesPersonal, queueEditor, voiceSettings, voiceVolumeWorks,
       startVoice, clickKeepsDialogue, startRotates, expressionPreview, crtSettingsSaved, startupScheduled,
       workingDialogue, workingOnlyOnce, completionDialogue, failedTurnSkipsCompletion, idleDialogue, idleOnlyOnce,
       startupDialogue, noQuotaOnClick, automaticQuota, noQuotaSticker, clickSharesWorkingQueue, interactionRotates,
@@ -637,7 +680,7 @@ async function runSmoke(win) {
       getVoiceQueues(settings).start.join() === 'a18,a19,a21,a23,a24' &&
       getVoiceQueues(settings).toolFailure.join() === 'a31,a32' &&
       Object.values(oldProfile.voiceQueues).every((queue) => queue.length === 0) && getVoiceQueues(oldProfile).start[0] === 'a18'
-    return { queuesReloaded, fpsReloaded: settings.fps === 45 }
+    return { queuesReloaded, fpsReloaded: settings.fps === 45, dragLockReloaded: settings.dragLock === false }
   })()`)
   if (!Object.values(reloaded).every(Boolean)) throw new Error(`Settings did not survive reload: ${JSON.stringify(reloaded)}`)
   console.log(JSON.stringify({ ...result, ...reloaded }))
@@ -682,11 +725,19 @@ if (!smoke && !app.requestSingleInstanceLock()) {
       registerInput(win)
       win.webContents.once('render-process-gone', () => app.exit(1))
       const showMode = managePetWindow(win)
-      let mode = 'codex'
-      try {
-        if ((await readFile(launchModePath, 'utf8')).trim() === 'standalone') mode = 'standalone'
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error
+      let mode = 'standalone'
+      if (forceStandalone) {
+        try {
+          await writeLaunchMode('standalone')
+        } catch (error) {
+          console.error('Closure launch mode:', error.message)
+        }
+      } else {
+        try {
+          mode = (await readFile(launchModePath, 'utf8')).trim() === 'codex' ? 'codex' : 'standalone'
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error
+        }
       }
       let switching = false
       ipcMain.handle('closure:launch-mode', async (event, nextMode) => {
@@ -695,10 +746,7 @@ if (!smoke && !app.requestSingleInstanceLock()) {
         if (nextMode === mode) return true
         switching = true
         try {
-          await mkdir(profile, { recursive: true })
-          const temporary = `${launchModePath}.${process.pid}.tmp`
-          await writeFile(temporary, nextMode + '\n', 'utf8')
-          await rename(temporary, launchModePath)
+          await writeLaunchMode(nextMode)
         } catch (error) {
           console.error('Closure launch mode:', error.message)
           switching = false

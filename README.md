@@ -1,22 +1,26 @@
 # 可露希尔的 Codex
 
-把《明日方舟》的可露希尔带到 Windows 桌面。桌宠可随 Codex 工作，也可独立运行，内置 57 条游戏原声，支持自定义语音队列和随机轮换。项目还提供 Codex 深浅主题与 CRT 覆盖效果。
+把《明日方舟》的可露希尔带到 Windows 桌面。桌宠可随 Codex 工作，也可独立运行，内置 57 条游戏原声，支持自定义语音队列和随机轮换。
+
+默认安装只添加一个独立桌宠：不导入主题、不启动 CRT 叠层，也不修改 Codex 的配色、窗口或页面。深浅主题和 CRT 仅作为可选文件保留，需要时再手动使用。
 
 本指南对应 `v0.5.0`。 [更新日志](CHANGELOG.md)
 
 ## 下载与安装
 
-1. 确认电脑使用 Windows x64，并已安装 Microsoft Store 版 Codex。
+1. 确认电脑使用 Windows x64。只使用独立桌宠时不需要安装 Codex；需要联动功能时再安装 Microsoft Store 版 Codex。
 2. 从发布页的 Assets 下载 `Closure-Codex-v0.5.0-win-x64.zip`。包内已附带 Electron 运行时。 [v0.5.0 发布页](https://github.com/OndoP3901/Closure-Codex/releases/tag/v0.5.0) · [直接下载安装包](https://github.com/OndoP3901/Closure-Codex/releases/download/v0.5.0/Closure-Codex-v0.5.0-win-x64.zip)
 3. 完整解压到你想长期保留的位置，然后双击解压目录里的 `Install.cmd`。
-4. 用原来的 Codex 图标打开客户端。已打开时，切回 Codex 即可。首次使用时，桌宠和 CRT 随 Codex 主窗口启动和退出，联动模式下隐藏托盘图标。需要更换配色时，继续执行下方的主题导入步骤。
+4. 安装会在桌面创建「可露希尔桌宠」快捷方式，双击即可单独启动，不弹出 cmd 窗口。也可以使用根目录的 `Start-Pet.cmd`。安装后不会自动导入主题，也不会启动 CRT，Codex 的界面保持原样。需要和 Codex 联动时，右键桌宠切换到「Codex 联动」。
 
 ### 升级与卸载
 
-- 升级时将新版解压到新目录，再从新目录运行 `Install.cmd`，启动项会切换到新版。要沿用运行模式、可见动画帧率、个人语音队列和 CRT 设置，可在安装前把旧目录里的 `work/companion-profile` 和 `work/crt-settings.ini` 复制到新版对应位置。
-- 卸载时在当前启用的安装目录双击 `Uninstall.cmd`，停止桌宠与 CRT 并移除 Windows 登录启动项。已导入的主题可在 Codex 的外观设置里换回。移动安装目录后，从新位置重新运行 `Install.cmd`。
+- 升级时将新版解压到新目录，再从新目录运行 `Install.cmd`，启动项会切换到新版。要沿用运行模式、可见动画帧率和个人语音队列，可在安装前把旧目录里的 `work/companion-profile` 复制到新版对应位置。只有继续使用可选 CRT 时，才需要同时复制 `work/crt-settings.ini`。
+- 卸载时在当前启用的安装目录双击 `Uninstall.cmd`，停止桌宠并移除 Windows 登录启动项。本版本不会自动导入主题，因此无需还原 Codex 外观。移动安装目录后，从新位置重新运行 `Install.cmd`。
 
-## 导入主题
+## 导入主题（可选）
+
+以下步骤完全可选，`Install.cmd` 不会自动执行，也不会读取或改写 Codex 的主题设置。只想保留原界面的用户可以跳过本节。
 
 1. 打开 Codex 的「设置 → 外观 → 高级」。如需分别导入两套主题，打开「分别设置浅色和深色模式」。可以先用「复制主题」保存原来的外观。
 2. 双击 `Copy-Dark-Theme.cmd` 或 `Copy-Light-Theme.cmd`，把复制的内容粘贴到对应的主题导入框。也可以手动复制主题文件的整行文字，包括开头的 `codex-theme-v1:`。 [深色主题](outputs/closure-theme/closure-dark.txt) · [浅色主题](outputs/closure-theme/closure-light.txt)
@@ -29,32 +33,33 @@
 
 主题优先使用 Cascadia Mono，中文回退到等线等系统字体。想使用像素字体，可安装 Fusion Pixel 12px，并在 Codex 的外观设置中把界面字体设为简体中文比例版、代码字体设为简体中文等宽版。 [Fusion Pixel 12px](https://github.com/TakWolf/fusion-pixel-font/releases)
 
-## 桌宠与 CRT
+## 桌宠
 
-左键点桌宠会播放互动动作。按住角色拖动，松开后会吸附到工作区边缘。
+左键点桌宠会播放互动动作。未锁定时按住角色拖动，松开后会吸附到工作区边缘。鼠标悬浮在桌宠上会显示锁头按钮，点击即可快速锁定或解锁拖动。
 
 右键点击角色打开设置面板。
 
 | 设置项 | 用法 |
 | --- | --- |
 | 运行模式 | 点击当前模式即可切换。详见下方「切换运行模式」。 |
+| 防误触锁定 | 锁定后鼠标无法拖动桌宠，单击互动和右键设置仍然可用，再点一次即可解锁。也可以直接点击悬浮在桌宠上的锁头按钮。设置会保留。 |
 | 镜像、大小、透明度、气泡 | 按需调整显示效果。点「重置位置」可恢复桌宠的默认位置。 |
 | 帧率 | 拖动「大小」下方的滑条，在 30–60 FPS 之间以 1 FPS 为步长调节。两种运行模式的待机、互动和工作动画均使用所选帧率，默认 60 FPS。调整即时生效，重启后保留。 |
 | 配音语言、配音音量、音效 | 切换普通话、日语、英语或韩语，字幕保持简体中文。角色配音和 UI 音效可以分别开关和调节音量。 |
 | 语音队列 | 查看各场景的默认队列，或切换到个人队列试听和编辑。 |
 | 预览表情 | 预览哭脸、庆祝、思考等动画。 |
-| CRT 显示效果 | 分别开关扫描线、暗角和「DSH 顶栏与渐变」。强度可调为 0% 至 150%，深浅模式可选跟随系统、深色或浅色。更改即时生效并在重启后保留。 |
+| CRT 显示效果 | 仅在 Codex 联动模式显示。本版本不会自动启动 CRT；只有手动运行 `outputs/closure-crt/ClosureCrt.exe` 时，这些选项才会作用于可选叠层。 |
 | 提醒与播报 | 在 Codex 联动模式下，自动额度提醒可设为关闭、每分钟或每五分钟，也可以单独关闭工具失败提示。 |
 
-扫描线、暗角、DSH 顶栏和紫色渐变由透明覆盖层绘制，鼠标可以穿透。CRT 始终跟随 Codex 主窗口。
+CRT 是独立的可选程序，安装、Windows 登录和 Codex 启动都不会拉起它。不运行 `ClosureCrt.exe` 时，Codex 上不会出现扫描线、暗角、顶栏或渐变。
 
 ### 切换运行模式
 
 1. 右键点击桌宠，再点「运行模式」旁显示当前模式的按钮。切换后，重新右键即可查看对应设置。
-2. **Codex 联动**随 Codex 主窗口启动和退出。主窗口位于前台时显示桌宠，切换应用、最小化、打开文件夹选择器或窗口过小时会暂时隐藏。
-3. **独立桌面**将桌宠放在当前屏幕的工作区，切换应用或关闭 Codex 后仍可拖动和点击。托盘菜单的「显示桌宠」可隐藏或恢复显示，也可选择「退出可露希尔桌宠」结束运行。退出后可双击 `outputs/closure-companion/launch.cmd` 重新启动。
+2. **Codex 联动**只在 Codex 主窗口位于前台时显示桌宠，切换应用、最小化、打开文件夹选择器或窗口过小时暂时隐藏。该模式只跟随窗口位置，不会改动 Codex 界面。
+3. **独立桌面**将桌宠放在当前屏幕的工作区，切换应用或关闭 Codex 后仍可拖动和点击。托盘菜单的「显示桌宠」可隐藏或恢复显示，也可选择「退出可露希尔桌宠」结束运行。双击桌面快捷方式或 `Start-Pet.cmd` 会强制使用此模式。
 
-桌宠会保存所选模式。已安装 Windows 登录启动项时，选择独立桌面后，下次登录 Windows 即可自动启动桌宠。
+桌宠会保存所选模式，首次安装默认为独立桌面。已安装 Windows 登录启动项时，登录 Windows 后会自动启动桌宠，不需要先打开 Codex。
 
 ### 设置语音队列
 
@@ -90,10 +95,11 @@
 
 ### 手动启动与运行位置
 
-- 可在解除自动启动后双击 `outputs/Start-Closure.cmd` 手动启动桌宠与 CRT，或运行 `outputs/closure-companion/launch.cmd` 仅启动桌宠。桌宠会沿用上次保存的运行模式。在 Codex 联动模式下，使用同目录的 `launch-with-activity.cmd` 可启用活动与额度联动。手动启动后可从托盘隐藏或退出。
+- 安装后桌面会出现「可露希尔桌宠」快捷方式，直接指向 `work/companion-runtime/electron/electron.exe`，参数为桌宠目录加 `--standalone`，不会弹出 cmd 窗口。移动安装目录后，从新位置重新运行 `Install.cmd` 即可重建快捷方式。
+- 根目录的 `Start-Pet.cmd` 和 `outputs/Start-Closure.cmd` 是便携入口，同样会单独启动桌宠并切换到独立桌面模式；不启动 CRT，也不需要 Codex 正在运行。运行 `outputs/closure-companion/launch.cmd` 会沿用上次保存的模式，`launch.cmd --standalone` 可强制独立桌面。手动启动后可从托盘隐藏或退出。
 - `launch.cmd --demo` 打开测试窗口，`launch.cmd --canvas` 强制使用 Canvas 2D 渲染。手动启动时可用 `CLOSURE_ELECTRON_EXE` 指定 Electron 45 Windows x64 可执行文件，或用 `CLOSURE_STATE_DIR` 指定数据目录。默认运行数据位于 `work/companion-profile`。
 - 模型、视觉和音频从本机加载，桌宠只读访问 Codex 配置与活动记录。另附原生桌宠格式和离线预览，使用前请查看随附说明。 [原生桌宠说明](outputs/closure-pet/说明.txt)
-- 联动模式下，助手意外退出会独立重试。桌宠或 CRT 未出现时，可先切回 Codex 主窗口并检查 `work/lifecycle.log`。重试耗尽后，关闭所有 Codex 主窗口再重新打开。
+- 联动模式下，助手意外退出会独立重试。桌宠未出现时，可先切回 Codex 主窗口并检查 `work/lifecycle.log`。重试耗尽后，关闭所有 Codex 主窗口再重新打开。
 
 ## 从源码构建
 

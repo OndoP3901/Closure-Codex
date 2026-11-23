@@ -32,6 +32,7 @@ import { createLayout } from './ui/layout.js'
 import { createPanel } from './ui/panel.js'
 import { createBubble } from './ui/bubble.js'
 import { createSticker } from './ui/sticker.js'
+import { createHoverLock } from './ui/hover-lock.js'
 import { createDrag } from './input/drag.js'
 import { createDirector } from './anim/director.js'
 import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
@@ -497,11 +498,18 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
     resolveFlip: resolveFlip, applyOpacity: applyOpacity,
     isBubbleShown: function () { return !!(bubbleApi && bubbleApi.isShown()) },
   })
+  var hoverLockUi = createHoverLock({
+    host: host, settings: settings, saveSettings: saveSettings,
+    panelIsOpen: panelIsOpen,
+    isDragging: function () { return dragApi ? dragApi.isDragging() : false },
+  })
   dragApi = createDrag({
     hitTest: hitTest, pet: pet, host: host, clampPos: clampPos, applyPosition: applyPosition,
     settle: settle, refreshBubble: refreshBubble, playSegment: playSegment,
     showBubble: bubbleApi.showInteraction, showValleySticker: showValleySticker,
     openPanel: openPanel, closePanel: closePanel, panelIsOpen: panelIsOpen, insidePanel: insidePanel,
+    insideLock: hoverLockUi.contains,
+    isLocked: function () { return settings.dragLock },
   })
 
   ;(async function boot() {
@@ -608,13 +616,15 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
         segments: function () { return [segmentRange(0), segmentRange(1)] },
         openPanel: openPanel,
         closePanel: closePanel,
-        get settings() { return { mirror: settings.mirror, size: settings.size, bubble: settings.bubble, opacity: settings.opacity, sound: settings.sound, volume: settings.volume } },
+        setHover: function (x, y) { hoverLockUi.update(x, y) },
+        get settings() { return { mirror: settings.mirror, size: settings.size, bubble: settings.bubble, dragLock: settings.dragLock, opacity: settings.opacity, sound: settings.sound, volume: settings.volume } },
         get split() { return INTERACT_SPLIT },
         setSettings: function (patch) {
           if (patch) {
             if (patch.mirror) settings.mirror = patch.mirror
             if (patch.size) settings.size = Number(patch.size)
             if (typeof patch.bubble === 'boolean') settings.bubble = patch.bubble
+            if (typeof patch.dragLock === 'boolean') settings.dragLock = patch.dragLock
             if (patch.opacity) settings.opacity = Number(patch.opacity)
             if (typeof patch.sound === 'boolean') settings.sound = patch.sound
             if (patch.volume !== undefined) settings.volume = Number(patch.volume)

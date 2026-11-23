@@ -29,7 +29,6 @@ public static class ClosureLifecycleWindows {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder result, int count);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder result, int count);
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr first, IntPtr second);
-    [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint thread, uint message, IntPtr first, IntPtr second);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CommandLineToArgvW(string line, out int count);
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr memory);
 
@@ -52,17 +51,17 @@ public static class ClosureLifecycleWindows {
         return ids;
     }
 
-    public static bool CloseHelper(int processId, bool crt) {
+    public static bool CloseHelper(int processId) {
         bool sent = false;
-        string expected = crt ? "Closure CRT Overlay" : "\u53ef\u9732\u5e0c\u5c14 \u00b7 Codex \u684c\u5ba0";
+        string expected = "\u53ef\u9732\u5e0c\u5c14 \u00b7 Codex \u684c\u5ba0";
         EnumWindows((window, unused) => {
             int owner;
-            uint thread = GetWindowThreadProcessId(window, out owner);
+            GetWindowThreadProcessId(window, out owner);
             if (owner != processId) return true;
             var title = new StringBuilder(64);
             GetWindowText(window, title, title.Capacity);
             if (title.ToString() != expected) return true;
-            sent = crt ? PostThreadMessage(thread, 0x0012, IntPtr.Zero, IntPtr.Zero) : PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero);
+            sent = PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero);
             return false;
         }, IntPtr.Zero);
         return sent;
@@ -84,7 +83,6 @@ public static class ClosureLifecycleWindows {
 $sessionId = (Get-Process -Id $PID).SessionId
 $outputRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $workRoot = [IO.Path]::GetFullPath((Join-Path $outputRoot '../work'))
-$crtExe = Join-Path $outputRoot 'closure-crt/ClosureCrt.exe'
 $petApp = Join-Path $outputRoot 'closure-companion'
 $electronExe = Join-Path $workRoot 'companion-runtime/electron/electron.exe'
 $launchModePath = Join-Path $workRoot 'companion-profile/launch-mode.txt'
@@ -107,9 +105,6 @@ function Test-CodexOpen {
 }
 
 function Find-OpenHelpers {
-    $crt = Get-Process -Name ClosureCrt -ErrorAction SilentlyContinue | Where-Object {
-        $_.SessionId -eq $sessionId -and $_.Path -eq $crtExe
-    } | Select-Object -First 1
     $pet = $null
     foreach ($process in (Get-CimInstance Win32_Process -Filter "Name='electron.exe' AND SessionId=$sessionId" -ErrorAction SilentlyContinue)) {
         if ($process.ExecutablePath -ne $electronExe -or !$process.CommandLine) { continue }
@@ -120,13 +115,10 @@ function Find-OpenHelpers {
         $pet = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
         if ($pet) { break }
     }
-    return @{ Crt = $crt; Pet = $pet }
+    return @{ Pet = $pet }
 }
 
 function Start-Helper($key) {
-    if ($key -eq 'Crt') {
-        return Start-Process -FilePath $crtExe -ArgumentList '--no-tray' -WindowStyle Hidden -PassThru
-    }
     $env:CLOSURE_STATE_DIR = Join-Path $workRoot 'companion-profile'
     Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
     $arguments = '"' + $petApp + '" --no-tray'
@@ -144,7 +136,7 @@ function Write-LifecycleLog($message) {
     } catch { Write-Verbose 'Could not write the lifecycle log.' }
 }
 
-function Update-Helpers($children, $recovery, [long] $now, $keys = @('Crt', 'Pet'), [bool] $standalone = $false) {
+function Update-Helpers($children, $recovery, [long] $now, $keys = @('Pet'), [bool] $standalone = $false) {
     foreach ($key in $keys) {
         $state = $recovery[$key]
         $process = $children[$key]
@@ -181,13 +173,13 @@ function Update-Helpers($children, $recovery, [long] $now, $keys = @('Crt', 'Pet
     }
 }
 
-function Stop-Helpers($children, $keys = @('Crt', 'Pet')) {
+function Stop-Helpers($children, $keys = @('Pet')) {
     foreach ($key in $keys) {
         $process = $children[$key]
         if (!$process) { continue }
         try {
             if (!$process.HasExited) {
-                [void][ClosureLifecycleWindows]::CloseHelper($process.Id, $key -eq 'Crt')
+                [void][ClosureLifecycleWindows]::CloseHelper($process.Id)
                 if (!$process.WaitForExit(1600)) { $process.Kill() }
             }
         } catch [InvalidOperationException] { }
@@ -197,14 +189,14 @@ function Stop-Helpers($children, $keys = @('Crt', 'Pet')) {
 
 if ($Probe) {
     $helpers = Find-OpenHelpers
-    [pscustomobject]@{ CodexOpen = (Test-CodexOpen); Crt = $helpers.Crt.Id; Pet = $helpers.Pet.Id }
+    [pscustomobject]@{ CodexOpen = (Test-CodexOpen); Pet = $helpers.Pet.Id }
     return
 }
 
 $mutex = [Threading.Mutex]::new($false, $mutexName)
 $ownsMutex = $false
 $signal = $null
-$children = @{ Crt = $null; Pet = $null }
+$children = @{ Pet = $null }
 try {
     try { $ownsMutex = $mutex.WaitOne(0) }
     catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
@@ -212,23 +204,23 @@ try {
     $signal = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $stopName)
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $lastOpen = $null
-    $required = @{ Crt = $false; Pet = $false }
+    $required = @{ Pet = $false }
     $recovery = @{}
-    $previousStandalone = $false
+    $previousStandalone = $true
     do {
         $now = $clock.ElapsedMilliseconds
         if (Test-CodexOpen) { $lastOpen = $now }
         $codexOpen = $null -ne $lastOpen -and $now - $lastOpen -lt 1500
         $standalone = $previousStandalone
         try {
-            $standalone = [IO.File]::ReadAllText($launchModePath).Trim() -eq 'standalone'
+            $standalone = [IO.File]::ReadAllText($launchModePath).Trim() -ne 'codex'
         } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
-            $standalone = $false
+            $standalone = $true
         } catch [IO.IOException] {
             # Use the last mode if the settings file is temporarily unavailable.
         }
-        $needed = @{ Crt = $codexOpen; Pet = $codexOpen -or $standalone }
-        foreach ($key in 'Crt', 'Pet') {
+        $needed = @{ Pet = $codexOpen -or $standalone }
+        foreach ($key in 'Pet') {
             if (!$needed[$key]) {
                 if ($children[$key]) { Stop-Helpers $children @($key) }
             } else {
@@ -244,9 +236,9 @@ try {
     } until ($signal.WaitOne(350))
 } finally {
     if ($ownsMutex) {
-        if (!$children.Pet -or !$children.Crt) {
+        if (!$children.Pet) {
             $running = Find-OpenHelpers
-            foreach ($key in 'Crt', 'Pet') {
+            foreach ($key in 'Pet') {
                 if (!$children[$key]) { $children[$key] = $running[$key] }
             }
         }

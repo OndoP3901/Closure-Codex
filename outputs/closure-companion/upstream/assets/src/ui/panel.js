@@ -71,6 +71,26 @@ export function createPanel(deps) {
       modeRow.appendChild(switchMode)
     }
 
+    var lockRow = row('防误触锁定')
+    var lockBtn = document.createElement('button')
+    lockBtn.type = 'button'
+    lockBtn.style.cssText = 'padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.18);' +
+      'background:rgba(255,255,255,.06);color:#dfe4f0;font:inherit;cursor:pointer'
+    function syncLockBtn() {
+      lockBtn.textContent = settings.dragLock ? '已锁定' : '未锁定'
+      lockBtn.style.background = settings.dragLock ? 'rgba(255,176,80,.85)' : 'rgba(255,255,255,.06)'
+      lockBtn.style.color = settings.dragLock ? '#231a08' : '#dfe4f0'
+      lockBtn.setAttribute('aria-pressed', settings.dragLock ? 'true' : 'false')
+      lockBtn.title = settings.dragLock ? '已锁定：鼠标无法拖动桌宠，点击解锁' : '未锁定：可以拖动桌宠，点击锁定'
+    }
+    lockBtn.addEventListener('click', function () {
+      settings.dragLock = !settings.dragLock
+      syncLockBtn()
+      saveSettings(true)
+    })
+    syncLockBtn()
+    lockRow.appendChild(lockBtn)
+
     // 镜像
     var mirrorRow = row('镜像')
     var segBox = document.createElement('span')

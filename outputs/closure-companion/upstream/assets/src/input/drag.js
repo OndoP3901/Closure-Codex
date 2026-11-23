@@ -22,6 +22,8 @@ export function createDrag(deps) {
   var closePanel = deps.closePanel
   var panelIsOpen = deps.panelIsOpen
   var insidePanel = deps.insidePanel
+  var insideLock = deps.insideLock || function () { return false }
+  var isLocked = deps.isLocked || function () { return false }
   var listeners = []
   function listen(target, type, fn, opts) {
     target.addEventListener(type, fn, opts)
@@ -113,24 +115,27 @@ export function createDrag(deps) {
     if (window.__dshClosurePet.phase !== 'running') return
     // 只要出现新的按下，就说明用户有了新意图：撤销上次松手留下的 click 吞口
     swallowClick = false
-    if (insidePanel(e.target)) return
+    if (insidePanel(e.target) || insideLock(e.target)) return
     if (e.button !== 0) return
     if (!hitTest(e.clientX, e.clientY)) {
       if (panelIsOpen()) closePanel()
       return
     }
-    // 命中桌宠：这一次按下归桌宠，先冻住页面，页面不能拿它去选区 / 拖图 / 点按钮
-    beginDragLock(e)
     var closedPanel = panelIsOpen()
     if (closedPanel) closePanel()
+    var locked = isLocked()
+    // 命中桌宠：这一次按下归桌宠，先冻住页面，页面不能拿它去选区 / 拖图 / 点按钮
     drag = {
       pointerId: e.pointerId,
       startX: e.clientX, startY: e.clientY,
       originX: pet.pos.x, originY: pet.pos.y,
       moved: false,
+      locked: locked,
       // 面板刚被这一下关掉：只冻结页面，不进入拖拽（免得"关面板"顺手把桌宠拖走）
       passive: closedPanel,
     }
+    if (locked) return
+    beginDragLock(e)
     if (!closedPanel) host.style.transition = 'none'
   }, true)
 
@@ -138,12 +143,12 @@ export function createDrag(deps) {
     if (!drag || e.pointerId !== drag.pointerId) return
     // 拖拽全程吃掉指针的默认动作（选区、文本光标、原生拖拽都从这儿开始）
     if (e.cancelable) { try { e.preventDefault() } catch (err) {} }
-    if (drag.passive) return
     var dx = e.clientX - drag.startX
     var dy = e.clientY - drag.startY
     if (!drag.moved && dx * dx + dy * dy >= DRAG_THRESHOLD_SQ) {
       drag.moved = true
     }
+    if (drag.passive || drag.locked) return
     if (!drag.moved) return
     pet.pos = clampPos(drag.originX + dx, drag.originY + dy)
     applyPosition()
@@ -153,6 +158,7 @@ export function createDrag(deps) {
     if (!drag || (e && e.pointerId !== drag.pointerId)) return
     var wasDrag = drag.moved
     var passive = drag.passive
+    var locked = drag.locked
     drag = null
     endDragLock()
     // 松手后浏览器还会补一次 click；标记一下，让紧跟其后的那一下被吞掉。
@@ -160,7 +166,9 @@ export function createDrag(deps) {
     swallowClick = !(e && e.type === 'pointercancel')
     if (passive) return
     host.style.transition = 'opacity .35s ease'
-    if (wasDrag) { settle(); refreshBubble() }
+    if (wasDrag) {
+      if (!locked) { settle(); refreshBubble() }
+    }
     else {
       const startSegment = !pet.segment
       if (startSegment) playSegment()
@@ -173,10 +181,11 @@ export function createDrag(deps) {
   function cancelDrag() {
     if (!drag) return
     var wasDrag = drag.moved
+    var locked = drag.locked
     drag = null
     endDragLock()
     host.style.transition = 'opacity .35s ease'
-    if (wasDrag) { settle(); refreshBubble() }
+    if (wasDrag && !locked) { settle(); refreshBubble() }
   }
 
   listen(window, 'pointerup', endDrag, true)
@@ -190,14 +199,14 @@ export function createDrag(deps) {
   listen(window, 'click', function (e) {
     if (!swallowClick) return
     swallowClick = false
-    if (insidePanel(e.target)) return
+    if (insidePanel(e.target) || insideLock(e.target)) return
     e.preventDefault()
     e.stopImmediatePropagation()
   }, true)
 
   listen(document, 'contextmenu', function (e) {
     if (window.__dshClosurePet.phase !== 'running') return
-    if (insidePanel(e.target)) return
+    if (insidePanel(e.target) || insideLock(e.target)) return
     if (!hitTest(e.clientX, e.clientY)) return
     e.preventDefault()
     openPanel()

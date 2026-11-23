@@ -18,7 +18,7 @@ $staging = Join-Path $destinationPath ($name + '-' + [Guid]::NewGuid().ToString(
 $package = New-Item -ItemType Directory -Path (Join-Path $staging $name)
 $packagePath = $package.FullName
 try {
-    foreach ($file in 'Install.cmd','Uninstall.cmd','Copy-Dark-Theme.cmd','Copy-Light-Theme.cmd','Setup.ps1','README.md','CHANGELOG.md') {
+    foreach ($file in 'Install.cmd','Uninstall.cmd','Copy-Dark-Theme.cmd','Copy-Light-Theme.cmd','Start-Pet.cmd','Setup.ps1','README.md','CHANGELOG.md') {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $packagePath
     }
     $outputPath = New-Item -ItemType Directory -Path (Join-Path $packagePath 'outputs')
