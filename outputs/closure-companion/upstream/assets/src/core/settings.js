@@ -29,7 +29,7 @@ export function saveSettings(immediate) {
       mirror: settings.mirror, size: settings.size, fps: settings.fps,
       bubble: settings.bubble, bubbleScale: settings.bubbleScale,
       bubbleFollowSize: settings.bubbleFollowSize, showHoverLock: settings.showHoverLock,
-      dragLock: settings.dragLock, alwaysOnTop: settings.alwaysOnTop,
+      startWithWindows: settings.startWithWindows, dragLock: settings.dragLock, alwaysOnTop: settings.alwaysOnTop,
       opacity: settings.opacity,
       sound: settings.sound, volume: settings.volume,
       voice: settings.voice, voiceLanguage: settings.voiceLanguage, voiceVolume: settings.voiceVolume,

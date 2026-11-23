@@ -1,5 +1,6 @@
 param(
     [switch] $Disable,
+    [switch] $Autostart,
     [switch] $NoActivity,
     [string] $StartupFolder = [Environment]::GetFolderPath('Startup'),
     [switch] $SkipStart
@@ -27,11 +28,18 @@ foreach ($item in (Join-Path $outputs 'closure-companion/main.cjs'), (Join-Path 
 $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $watcher + '"'
 if ($NoActivity) { $arguments += ' -NoActivity' }
 $shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $powershell
-$shortcut.Arguments = $arguments
-$shortcut.WorkingDirectory = $PSScriptRoot
-$shortcut.WindowStyle = 7
-$shortcut.Description = 'Start the Closure desktop pet. Codex themes and windows are not modified.'
-$shortcut.Save()
+if ($Autostart) {
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $powershell
+    $shortcut.Arguments = $arguments
+    $shortcut.WorkingDirectory = $PSScriptRoot
+    $shortcut.WindowStyle = 7
+    $shortcut.Description = 'Start the Closure desktop pet. Codex themes and windows are not modified.'
+    $shortcut.Save()
+} elseif (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
+    $existing = $shell.CreateShortcut($shortcutPath)
+    if ($existing.Arguments -like ('*"' + [WildcardPattern]::Escape($watcher) + '"*')) {
+        Remove-Item -LiteralPath $shortcutPath -Force
+    }
+}
 if (!$SkipStart) { Start-Process -FilePath $powershell -ArgumentList $arguments -WindowStyle Hidden }

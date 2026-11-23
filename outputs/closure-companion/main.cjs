@@ -181,6 +181,31 @@ function watchFullscreen(win, report) {
   }
 }
 
+function setStartupAutostart(enable) {
+  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+      path.join(__dirname, 'autostart.ps1'),
+      '-ElectronExe', process.execPath,
+    ]
+    if (!enable) args.push('-Disable')
+    const child = spawn(powershell, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stderr = ''
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(new Error('autostart.ps1 timed out'))
+    }, 15000)
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.once('error', (error) => { clearTimeout(timer); reject(error) })
+    child.once('close', (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve()
+      else reject(new Error(stderr.trim() || `autostart.ps1 exited with code ${code}`))
+    })
+  })
+}
+
 function managePetWindow(win) {
   let mode = 'codex'
   let desktopDisplay
@@ -485,6 +510,9 @@ async function runSmoke(win) {
       normalizeSettings({ bubbleScale: 0.1 }).bubbleScale === 0.8 &&
       normalizeSettings({ bubbleFollowSize: false }).bubbleFollowSize === false &&
       normalizeSettings({ showHoverLock: false }).showHoverLock === false
+    const autostartDefaults = normalizeSettings({ startWithWindows: true }).startWithWindows === true &&
+      normalizeSettings({}).startWithWindows === false
+    const autostartHiddenInCodexMode = !document.querySelector('button[aria-label="开机自启动"]')
     const fpsRange = fpsSlider.min === '30' && fpsSlider.max === '60' && fpsSlider.step === '1' &&
       fpsSlider.value === '60' && normalizeSettings({ size: 1 }).fps === 60 &&
       normalizeSettings({ fps: 10 }).fps === 30 && normalizeSettings({ fps: 90 }).fps === 60
@@ -771,6 +799,7 @@ async function runSmoke(win) {
       hoverLockAutoHides, hoverLockReshows,
       hoverLockSyncsPanel, hoverUnlockSyncsPanel, bubbleFollowsPet, bubbleScaleWorks, bubbleUnfollows,
       hoverLockDefaultOn, hoverLockHiddenBySetting, hoverLockShownAgain, bubbleRange,
+      autostartDefaults, autostartHiddenInCodexMode,
       alwaysOnTopButton, alwaysOnTopOff,
       clicked, panelOpened, fpsSliderWorks, notificationsSaved, defaultQueues, defaultOverridesPersonal, queueEditor, voiceSettings, voiceVolumeWorks,
       startVoice, clickKeepsDialogue, startRotates, expressionPreview, crtSettingsSaved, startupScheduled,
@@ -857,6 +886,17 @@ if (!smoke && !app.requestSingleInstanceLock()) {
         : undefined
       win.once('closed', () => stopFullscreenWatch?.())
       let mode = 'standalone'
+      ipcMain.handle('closure:autostart', async (event, enabled) => {
+        if (event.sender !== win.webContents || typeof enabled !== 'boolean') return false
+        if (mode !== 'standalone' || process.platform !== 'win32') return false
+        try {
+          await setStartupAutostart(enabled)
+          return true
+        } catch (error) {
+          console.error('Closure autostart:', error.message)
+          return false
+        }
+      })
       if (forceStandalone) {
         try {
           await writeLaunchMode('standalone')

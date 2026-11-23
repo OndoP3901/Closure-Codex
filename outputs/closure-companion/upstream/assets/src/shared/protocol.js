@@ -31,6 +31,7 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   bubbleScale: 1,
   bubbleFollowSize: true,
   showHoverLock: true,
+  startWithWindows: false,
   dragLock: false,
   alwaysOnTop: true,
   opacity: 1,
@@ -75,6 +76,7 @@ export function normalizeSettings(raw, base) {
   if (Number.isFinite(bubbleScale)) out.bubbleScale = Math.min(1.6, Math.max(0.8, bubbleScale))
   if (typeof raw.bubbleFollowSize === 'boolean') out.bubbleFollowSize = raw.bubbleFollowSize
   if (typeof raw.showHoverLock === 'boolean') out.showHoverLock = raw.showHoverLock
+  if (typeof raw.startWithWindows === 'boolean') out.startWithWindows = raw.startWithWindows
   if (typeof raw.dragLock === 'boolean') out.dragLock = raw.dragLock
   if (typeof raw.alwaysOnTop === 'boolean') out.alwaysOnTop = raw.alwaysOnTop
   const opacity = Number(raw.opacity)

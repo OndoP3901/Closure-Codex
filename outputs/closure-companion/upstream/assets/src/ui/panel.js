@@ -137,6 +137,43 @@ export function createPanel(deps) {
       topRow.appendChild(topBtn)
     }
 
+    var syncStartup = null
+    if (deps.standalone && deps.setAutostart) {
+      var startupRow = row('开机自启动')
+      var startupBtn = document.createElement('button')
+      startupBtn.type = 'button'
+      startupBtn.setAttribute('aria-label', '开机自启动')
+      startupBtn.style.cssText = 'padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.18);' +
+        'background:rgba(255,255,255,.06);color:#dfe4f0;font:inherit;cursor:pointer'
+      syncStartup = function () {
+        startupBtn.textContent = settings.startWithWindows ? '开' : '关'
+        startupBtn.style.background = settings.startWithWindows ? 'rgba(125,134,255,.85)' : 'rgba(255,255,255,.06)'
+        startupBtn.style.color = settings.startWithWindows ? '#fff' : '#dfe4f0'
+        startupBtn.setAttribute('aria-pressed', settings.startWithWindows ? 'true' : 'false')
+        startupBtn.title = '仅独立模式可用。开启后登录 Windows 时自动启动桌宠。'
+      }
+      startupBtn.addEventListener('click', async function () {
+        var prev = settings.startWithWindows
+        var next = !prev
+        settings.startWithWindows = next
+        syncStartup()
+        startupBtn.disabled = true
+        startupBtn.textContent = '设置中…'
+        saveSettings(true)
+        var ok = false
+        try { ok = await deps.setAutostart() } catch (err) { ok = false }
+        if (!ok) {
+          settings.startWithWindows = prev
+          saveSettings(true)
+        }
+        startupBtn.disabled = false
+        syncStartup()
+        if (!ok) startupBtn.title = '设置失败，请重试。'
+      })
+      syncStartup()
+      startupRow.appendChild(startupBtn)
+    }
+
     // 镜像
     var mirrorRow = row('镜像')
     var segBox = document.createElement('span')
@@ -586,7 +623,7 @@ export function createPanel(deps) {
     syncMirrorButtons()
     return {
       syncMirrorButtons, slider, sizeText, syncFps, syncLock: syncLockBtn, syncHoverLock: syncHoverLockBtn,
-      syncBubbleSize, syncFollowBtn, voiceQueues,
+      syncStartup, syncBubbleSize, syncFollowBtn, voiceQueues,
     }
   }
 
@@ -600,6 +637,7 @@ export function createPanel(deps) {
       panelApi.syncMirrorButtons()
       panelApi.syncLock()
       panelApi.syncHoverLock()
+      if (panelApi.syncStartup) panelApi.syncStartup()
       panelApi.syncBubbleSize()
       panelApi.syncFollowBtn()
     }

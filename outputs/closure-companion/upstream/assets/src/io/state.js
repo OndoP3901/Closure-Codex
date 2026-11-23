@@ -240,6 +240,7 @@ export function createState(deps) {
         if (isFinite(Number(s.bubbleScale))) settings.bubbleScale = Math.min(1.6, Math.max(0.8, Number(s.bubbleScale)))
         if (typeof s.bubbleFollowSize === 'boolean') settings.bubbleFollowSize = s.bubbleFollowSize
         if (typeof s.showHoverLock === 'boolean') settings.showHoverLock = s.showHoverLock
+        if (typeof s.startWithWindows === 'boolean') settings.startWithWindows = s.startWithWindows
         if (typeof s.dragLock === 'boolean') settings.dragLock = s.dragLock
         if (typeof s.alwaysOnTop === 'boolean') settings.alwaysOnTop = s.alwaysOnTop
         if (isFinite(Number(s.opacity))) settings.opacity = Math.min(1, Math.max(0.3, Number(s.opacity)))

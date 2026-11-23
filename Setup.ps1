@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch] $Uninstall,
     [ValidateSet('Dark', 'Light')] [string] $CopyTheme,
     [string] $StartupFolder = [Environment]::GetFolderPath('Startup'),
@@ -49,6 +49,8 @@ function Install-PetShortcut {
 
 if ($Uninstall) {
     Remove-PetShortcut
+    $petAutostart = Join-Path $petApp 'autostart.ps1'
+    if (Test-Path -LiteralPath $petAutostart -PathType Leaf) { & $petAutostart -Disable -StartupFolder $StartupFolder }
     if ($previous -and $previous.Arguments -like ('*"' + [WildcardPattern]::Escape($watcher) + '"*')) {
         & $config @registration -Disable
     }

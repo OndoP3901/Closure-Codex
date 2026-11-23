@@ -315,6 +315,22 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
   function syncAlwaysOnTop() {
     try { window.closureCompanion?.setAlwaysOnTop?.(settings.alwaysOnTop === true) } catch (err) {}
   }
+  var autostartSynced
+  function syncAutostart() {
+    if (!standalone) return Promise.resolve(false)
+    var next = settings.startWithWindows === true
+    if (next === autostartSynced) return Promise.resolve(true)
+    autostartSynced = next
+    var pending
+    try { pending = window.closureCompanion?.setAutostart?.(next) } catch (err) { pending = null }
+    return Promise.resolve(pending).then(function (ok) {
+      if (ok !== true) autostartSynced = !next
+      return ok === true
+    }, function () {
+      autostartSynced = !next
+      return false
+    })
+  }
 
   // ————————————————————— 交互：点击 / 拖拽 / 右键 —————————————————————
   // 实现在 input/drag.js；监听在组合阶段注册。
@@ -476,6 +492,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
     hideBubble: hideBubble, audioEnsure: audioEnsure, loadSounds: loadSounds, playSound: playSound,
     refreshBubble: refreshBubble,
     setAlwaysOnTop: window.closureCompanion?.setAlwaysOnTop ? syncAlwaysOnTop : undefined,
+    setAutostart: window.closureCompanion?.setAutostart ? syncAutostart : undefined,
     updateVoice: audio.stopVoice,
     previewVoice: (id) => {
       if (!settings.voice || document.hidden) return Promise.resolve(false)
@@ -608,6 +625,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
       playLoop('Idle', true)
       start()
       syncAlwaysOnTop()
+      syncAutostart()
       if (!standalone) startPolling()
       loadHostConfig()
       loadSounds()
@@ -630,6 +648,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
             mirror: settings.mirror, size: settings.size, bubble: settings.bubble, dragLock: settings.dragLock,
             bubbleScale: settings.bubbleScale, bubbleFollowSize: settings.bubbleFollowSize,
             showHoverLock: settings.showHoverLock, alwaysOnTop: settings.alwaysOnTop,
+            startWithWindows: settings.startWithWindows,
             opacity: settings.opacity, sound: settings.sound, volume: settings.volume,
           }
         },
@@ -642,13 +661,14 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
             if (patch.bubbleScale !== undefined) settings.bubbleScale = Number(patch.bubbleScale)
             if (typeof patch.bubbleFollowSize === 'boolean') settings.bubbleFollowSize = patch.bubbleFollowSize
             if (typeof patch.showHoverLock === 'boolean') settings.showHoverLock = patch.showHoverLock
+            if (typeof patch.startWithWindows === 'boolean') settings.startWithWindows = patch.startWithWindows
             if (typeof patch.dragLock === 'boolean') settings.dragLock = patch.dragLock
             if (typeof patch.alwaysOnTop === 'boolean') settings.alwaysOnTop = patch.alwaysOnTop
             if (patch.opacity) settings.opacity = Number(patch.opacity)
             if (typeof patch.sound === 'boolean') settings.sound = patch.sound
             if (patch.volume !== undefined) settings.volume = Number(patch.volume)
           }
-          saveSettings(true); syncAlwaysOnTop(); layout(); repositionForAnchor(); resolveFlip(); applyOpacity()
+          saveSettings(true); syncAlwaysOnTop(); syncAutostart(); layout(); repositionForAnchor(); resolveFlip(); applyOpacity()
           refreshBubble()
           if (!settings.bubble) hideBubble()
         },

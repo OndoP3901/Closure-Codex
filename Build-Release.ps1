@@ -1,6 +1,7 @@
-param(
+﻿param(
     [string] $Version = '0.5.0',
     [string] $ElectronZip = (Join-Path $PSScriptRoot 'work/companion-runtime/electron-mirror.zip'),
+    [string] $Rcedit = (Join-Path $PSScriptRoot 'work/tools/rcedit.exe'),
     [string] $Destination = (Join-Path $PSScriptRoot 'dist')
 )
 
@@ -9,6 +10,9 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected a numeric version su
 $runtimeHash = '2BA6223AFA9121F42831FEFE92C434334907540165294FC56697449D12E7CFE9'
 if (!(Test-Path -LiteralPath $ElectronZip -PathType Leaf) -or (Get-FileHash -LiteralPath $ElectronZip).Hash -ne $runtimeHash) {
     throw 'Supply the official electron-v45.4.1-win32-x64.zip using -ElectronZip.'
+}
+if (!(Test-Path -LiteralPath $Rcedit -PathType Leaf)) {
+    throw 'Supply rcedit-x64.exe using -Rcedit (https://github.com/electron/rcedit/releases).'
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -31,6 +35,9 @@ try {
     & (Join-Path $outputPath.FullName 'closure-crt/Build.ps1')
     $runtimePath = New-Item -ItemType Directory -Path (Join-Path $packagePath 'work/companion-runtime/electron') -Force
     [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -LiteralPath $ElectronZip).Path, $runtimePath.FullName)
+    $electronExe = Join-Path $runtimePath.FullName 'electron.exe'
+    $petIcon = Join-Path $outputPath.FullName 'closure-companion/upstream/icon.ico'
+    & $Rcedit $electronExe --set-icon $petIcon --set-version-string FileDescription '可露希尔桌宠' --set-version-string ProductName '可露希尔桌宠' --set-version-string CompanyName 'Closure' --set-file-version $Version --set-product-version $Version
 
     $zip = Join-Path $destinationPath "$name.zip"
     $temporaryZip = Join-Path $staging "$name.zip"
