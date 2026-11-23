@@ -25,6 +25,7 @@ public static class ClosureFullscreen {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int capacity);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hwnd, int index);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
     public static string ClassOf(IntPtr hwnd) {
         var name = new StringBuilder(64);
@@ -40,6 +41,19 @@ public static class ClosureFullscreen {
 
     public static bool IsMaximized(IntPtr hwnd) {
         return (GetWindowLong(hwnd, -16) & 0x01000000) != 0; // WS_MAXIMIZE
+    }
+
+    // Desktop organizers, wallpaper engines and input overlays usually use
+    // WS_EX_TOOLWINDOW. They may cover the monitor but are not fullscreen apps.
+    public static bool IsToolWindow(IntPtr hwnd) {
+        return (GetWindowLong(hwnd, -20) & 0x00000080) != 0;
+    }
+
+    public static bool IsInputHost(IntPtr hwnd) {
+        uint processId;
+        GetWindowThreadProcessId(hwnd, out processId);
+        try { return System.Diagnostics.Process.GetProcessById((int)processId).ProcessName == "TextInputHost"; }
+        catch { return false; }
     }
 
     public static bool CoversMonitor(IntPtr hwnd) {
@@ -65,6 +79,8 @@ do {
         [ClosureFullscreen]::IsWindowVisible($active) -and
         ![ClosureFullscreen]::IsIconic($active) -and
         ![ClosureFullscreen]::IsShell($active) -and
+        ![ClosureFullscreen]::IsToolWindow($active) -and
+        ![ClosureFullscreen]::IsInputHost($active) -and
         ![ClosureFullscreen]::IsMaximized($active) -and
         [ClosureFullscreen]::CoversMonitor($active)
     $line = if ($fullscreen) { '{"fullscreen":true}' } else { '{"fullscreen":false}' }

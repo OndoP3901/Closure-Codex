@@ -9,6 +9,7 @@ export function createHoverLock(deps) {
   var saveSettings = deps.saveSettings
   var panelIsOpen = deps.panelIsOpen || function () { return false }
   var isDragging = deps.isDragging || function () { return false }
+  var onLockChange = deps.onLockChange || function () {}
 
   var button = document.createElement('button')
   button.type = 'button'
@@ -53,7 +54,7 @@ export function createHoverLock(deps) {
   function update(x, y) {
     var rect = host.getBoundingClientRect()
     var inside = x >= rect.left - 4 && x <= rect.right + 4 && y >= rect.top - 4 && y <= rect.bottom + 4
-    setShown(inside && !panelIsOpen() && !isDragging())
+    setShown(inside && settings.showHoverLock !== false && !panelIsOpen() && !isDragging())
   }
 
   function contains(target) {
@@ -66,6 +67,7 @@ export function createHoverLock(deps) {
     settings.dragLock = !settings.dragLock
     sync()
     saveSettings(true)
+    onLockChange()
   })
   host.appendChild(button)
   sync()

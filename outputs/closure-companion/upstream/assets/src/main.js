@@ -474,6 +474,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
     settings: settings, saveSettings: saveSettings, resolveFlip: resolveFlip,
     layout: layout, repositionForAnchor: repositionForAnchor, applyOpacity: applyOpacity,
     hideBubble: hideBubble, audioEnsure: audioEnsure, loadSounds: loadSounds, playSound: playSound,
+    refreshBubble: refreshBubble,
     setAlwaysOnTop: window.closureCompanion?.setAlwaysOnTop ? syncAlwaysOnTop : undefined,
     updateVoice: audio.stopVoice,
     previewVoice: (id) => {
@@ -507,6 +508,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
     host: host, settings: settings, saveSettings: saveSettings,
     panelIsOpen: panelIsOpen,
     isDragging: function () { return dragApi ? dragApi.isDragging() : false },
+    onLockChange: function () { if (panelUi) panelUi.syncLock() },
   })
   dragApi = createDrag({
     hitTest: hitTest, pet: pet, host: host, clampPos: clampPos, applyPosition: applyPosition,
@@ -626,7 +628,9 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
         get settings() {
           return {
             mirror: settings.mirror, size: settings.size, bubble: settings.bubble, dragLock: settings.dragLock,
-            alwaysOnTop: settings.alwaysOnTop, opacity: settings.opacity, sound: settings.sound, volume: settings.volume,
+            bubbleScale: settings.bubbleScale, bubbleFollowSize: settings.bubbleFollowSize,
+            showHoverLock: settings.showHoverLock, alwaysOnTop: settings.alwaysOnTop,
+            opacity: settings.opacity, sound: settings.sound, volume: settings.volume,
           }
         },
         get split() { return INTERACT_SPLIT },
@@ -635,6 +639,9 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
             if (patch.mirror) settings.mirror = patch.mirror
             if (patch.size) settings.size = Number(patch.size)
             if (typeof patch.bubble === 'boolean') settings.bubble = patch.bubble
+            if (patch.bubbleScale !== undefined) settings.bubbleScale = Number(patch.bubbleScale)
+            if (typeof patch.bubbleFollowSize === 'boolean') settings.bubbleFollowSize = patch.bubbleFollowSize
+            if (typeof patch.showHoverLock === 'boolean') settings.showHoverLock = patch.showHoverLock
             if (typeof patch.dragLock === 'boolean') settings.dragLock = patch.dragLock
             if (typeof patch.alwaysOnTop === 'boolean') settings.alwaysOnTop = patch.alwaysOnTop
             if (patch.opacity) settings.opacity = Number(patch.opacity)
@@ -642,6 +649,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
             if (patch.volume !== undefined) settings.volume = Number(patch.volume)
           }
           saveSettings(true); syncAlwaysOnTop(); layout(); repositionForAnchor(); resolveFlip(); applyOpacity()
+          refreshBubble()
           if (!settings.bubble) hideBubble()
         },
         resetPosition: resetPosition,

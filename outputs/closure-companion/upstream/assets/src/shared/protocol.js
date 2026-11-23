@@ -28,6 +28,9 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   size: 1,
   fps: FPS_MAX,
   bubble: true,
+  bubbleScale: 1,
+  bubbleFollowSize: true,
+  showHoverLock: true,
   dragLock: false,
   alwaysOnTop: true,
   opacity: 1,
@@ -68,6 +71,10 @@ export function normalizeSettings(raw, base) {
   if (Number.isFinite(size)) out.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, size))
   if (Number.isFinite(raw.fps)) out.fps = Math.min(FPS_MAX, Math.max(FPS_MIN, Math.round(raw.fps)))
   if (typeof raw.bubble === 'boolean') out.bubble = raw.bubble
+  const bubbleScale = Number(raw.bubbleScale)
+  if (Number.isFinite(bubbleScale)) out.bubbleScale = Math.min(1.6, Math.max(0.8, bubbleScale))
+  if (typeof raw.bubbleFollowSize === 'boolean') out.bubbleFollowSize = raw.bubbleFollowSize
+  if (typeof raw.showHoverLock === 'boolean') out.showHoverLock = raw.showHoverLock
   if (typeof raw.dragLock === 'boolean') out.dragLock = raw.dragLock
   if (typeof raw.alwaysOnTop === 'boolean') out.alwaysOnTop = raw.alwaysOnTop
   const opacity = Number(raw.opacity)

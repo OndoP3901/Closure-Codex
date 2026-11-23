@@ -237,6 +237,9 @@ export function createState(deps) {
         if (s.mirror === 'auto' || s.mirror === 'always' || s.mirror === 'never') settings.mirror = s.mirror
         if (isFinite(Number(s.size))) settings.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, Number(s.size)))
         if (typeof s.bubble === 'boolean') settings.bubble = s.bubble
+        if (isFinite(Number(s.bubbleScale))) settings.bubbleScale = Math.min(1.6, Math.max(0.8, Number(s.bubbleScale)))
+        if (typeof s.bubbleFollowSize === 'boolean') settings.bubbleFollowSize = s.bubbleFollowSize
+        if (typeof s.showHoverLock === 'boolean') settings.showHoverLock = s.showHoverLock
         if (typeof s.dragLock === 'boolean') settings.dragLock = s.dragLock
         if (typeof s.alwaysOnTop === 'boolean') settings.alwaysOnTop = s.alwaysOnTop
         if (isFinite(Number(s.opacity))) settings.opacity = Math.min(1, Math.max(0.3, Number(s.opacity)))
@@ -248,6 +251,7 @@ export function createState(deps) {
         repositionForAnchor()
         resolveFlip()
         applyOpacity()
+        refreshBubble()
         if (syncAlwaysOnTop) syncAlwaysOnTop()
         saveSettings(true)
       })

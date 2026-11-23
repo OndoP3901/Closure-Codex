@@ -437,6 +437,43 @@ async function runSmoke(win) {
     const dragLockButtonOn = lockButton.textContent === '已锁定' && getSavedSettings().dragLock === true
     lockButton.click()
     const dragLockButtonOff = lockButton.textContent === '未锁定' && getSavedSettings().dragLock === false
+    lockIcon.click()
+    const hoverLockSyncsPanel = lockButton.textContent === '已锁定' &&
+      lockButton.getAttribute('aria-pressed') === 'true' && getSavedSettings().dragLock === true
+    lockIcon.click()
+    const hoverUnlockSyncsPanel = lockButton.textContent === '未锁定' &&
+      lockButton.getAttribute('aria-pressed') === 'false' && getSavedSettings().dragLock === false
+    const hoverLockToggle = settings.querySelector('button[aria-label="防误触锁定快捷开关"]')
+    const hoverLockDefaultOn = hoverLockToggle.textContent === '开' &&
+      hoverLockToggle.getAttribute('aria-pressed') === 'true'
+    hoverLockToggle.click()
+    pet.closePanel()
+    pet.setHover(hostRect.left + 2, hostRect.top + 2)
+    const hoverLockHiddenBySetting = lockIcon.style.opacity === '0' && getSavedSettings().showHoverLock === false
+    pet.openPanel()
+    hoverLockToggle.click()
+    pet.closePanel()
+    pet.setHover(hostRect.left + 2, hostRect.top + 2)
+    const hoverLockShownAgain = lockIcon.style.opacity === '1' && getSavedSettings().showHoverLock === true
+    pet.setHover(-200, -200)
+    pet.openPanel()
+    const bubbleSizeSlider = settings.querySelector('input[aria-label="气泡字号"]')
+    const followButton = settings.querySelector('button[aria-label="跟随桌宠缩放"]')
+    const bubbleTextNode = () => document.querySelector('#dsh-closure-pet-bubble div')
+    const bubbleFontSize = () => Number.parseFloat(bubbleTextNode().style.fontSize)
+    pet.setSettings({ size: 1.5 })
+    pet.showBubble('字号测试')
+    const bubbleFollowsPet = Math.abs(bubbleFontSize() - 36) < 0.1
+    bubbleSizeSlider.value = '1.2'
+    bubbleSizeSlider.dispatchEvent(new Event('input', { bubbles: true }))
+    const bubbleScaleWorks = Math.abs(bubbleFontSize() - 44) < 0.1 && getSavedSettings().bubbleScale === 1.2
+    followButton.click()
+    const bubbleUnfollows = Math.abs(bubbleFontSize() - 30) < 0.1 && getSavedSettings().bubbleFollowSize === false
+    followButton.click()
+    pet.setSettings({ size: 1 })
+    bubbleSizeSlider.value = '1'
+    bubbleSizeSlider.dispatchEvent(new Event('input', { bubbles: true }))
+    pet.hideBubble()
     const topButton = [...settings.querySelectorAll('button')].find((button) => button.title.includes('全屏应用时自动隐藏'))
     const alwaysOnTopButton = Boolean(topButton) && topButton.textContent === '开' &&
       topButton.getAttribute('aria-pressed') === 'true'
@@ -444,6 +481,10 @@ async function runSmoke(win) {
     const alwaysOnTopOff = topButton.textContent === '关' && getSavedSettings().alwaysOnTop === false
     const fpsSlider = settings.querySelector('input[type="range"][aria-label="帧率"]')
     const { normalizeSettings } = await import('/dsh-closure/assets/src/shared/protocol.js')
+    const bubbleRange = normalizeSettings({ bubbleScale: 9 }).bubbleScale === 1.6 &&
+      normalizeSettings({ bubbleScale: 0.1 }).bubbleScale === 0.8 &&
+      normalizeSettings({ bubbleFollowSize: false }).bubbleFollowSize === false &&
+      normalizeSettings({ showHoverLock: false }).showHoverLock === false
     const fpsRange = fpsSlider.min === '30' && fpsSlider.max === '60' && fpsSlider.step === '1' &&
       fpsSlider.value === '60' && normalizeSettings({ size: 1 }).fps === 60 &&
       normalizeSettings({ fps: 10 }).fps === 30 && normalizeSettings({ fps: 90 }).fps === 60
@@ -720,6 +761,8 @@ async function runSmoke(win) {
     }
     defaultMode.click()
     return { dragged, dragLockWorks, hoverLockWorks, dragLockButton: dragLockButton && dragLockButtonOn && dragLockButtonOff,
+      hoverLockSyncsPanel, hoverUnlockSyncsPanel, bubbleFollowsPet, bubbleScaleWorks, bubbleUnfollows,
+      hoverLockDefaultOn, hoverLockHiddenBySetting, hoverLockShownAgain, bubbleRange,
       alwaysOnTopButton, alwaysOnTopOff,
       clicked, panelOpened, fpsSliderWorks, notificationsSaved, defaultQueues, defaultOverridesPersonal, queueEditor, voiceSettings, voiceVolumeWorks,
       startVoice, clickKeepsDialogue, startRotates, expressionPreview, crtSettingsSaved, startupScheduled,

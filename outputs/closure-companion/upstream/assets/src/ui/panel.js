@@ -91,6 +91,29 @@ export function createPanel(deps) {
     syncLockBtn()
     lockRow.appendChild(lockBtn)
 
+    var hoverLockRow = row('防误触锁定快捷开关')
+    var hoverLockBtn = document.createElement('button')
+    hoverLockBtn.type = 'button'
+    hoverLockBtn.setAttribute('aria-label', '防误触锁定快捷开关')
+    hoverLockBtn.style.cssText = 'padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.18);' +
+      'background:rgba(255,255,255,.06);color:#dfe4f0;font:inherit;cursor:pointer'
+    function syncHoverLockBtn() {
+      hoverLockBtn.textContent = settings.showHoverLock !== false ? '开' : '关'
+      hoverLockBtn.style.background = settings.showHoverLock !== false ? 'rgba(125,134,255,.85)' : 'rgba(255,255,255,.06)'
+      hoverLockBtn.style.color = settings.showHoverLock !== false ? '#fff' : '#dfe4f0'
+      hoverLockBtn.setAttribute('aria-pressed', settings.showHoverLock !== false ? 'true' : 'false')
+      hoverLockBtn.title = settings.showHoverLock !== false
+        ? '鼠标悬浮在桌宠上时显示锁头按钮，点击关闭'
+        : '鼠标悬浮时不显示锁头按钮，仍可在设置面板里锁定，点击开启'
+    }
+    hoverLockBtn.addEventListener('click', function () {
+      settings.showHoverLock = settings.showHoverLock === false
+      syncHoverLockBtn()
+      saveSettings(true)
+    })
+    syncHoverLockBtn()
+    hoverLockRow.appendChild(hoverLockBtn)
+
     if (deps.setAlwaysOnTop) {
       var topRow = row('置顶显示')
       var topBtn = document.createElement('button')
@@ -162,6 +185,7 @@ export function createPanel(deps) {
       sizeText.textContent = Math.round(settings.size * 100) + '%'
       layout()
       repositionForAnchor()
+      if (deps.refreshBubble) deps.refreshBubble()
       clearTimeout(saveTimer)
       saveTimer = setTimeout(saveSettings, 250)
     })
@@ -212,6 +236,58 @@ export function createPanel(deps) {
     })
     syncBubbleBtn()
     bubbleRow.appendChild(bubbleBtn)
+
+    // 气泡字号（可随桌宠大小联动）
+    var bubbleSizeRow = row('气泡字号')
+    var bubbleSizeWrap = document.createElement('span')
+    bubbleSizeWrap.style.cssText = 'display:inline-flex;align-items:center;gap:8px'
+    var bubbleSizeSlider = document.createElement('input')
+    bubbleSizeSlider.type = 'range'
+    bubbleSizeSlider.min = '0.8'
+    bubbleSizeSlider.max = '1.6'
+    bubbleSizeSlider.step = '0.05'
+    bubbleSizeSlider.value = String(settings.bubbleScale)
+    bubbleSizeSlider.setAttribute('aria-label', '气泡字号')
+    bubbleSizeSlider.style.cssText = 'width:96px;accent-color:#7d86ff;cursor:pointer'
+    var bubbleSizeText = document.createElement('span')
+    bubbleSizeText.style.cssText = 'width:42px;text-align:right;color:#cfd6e6'
+    function syncBubbleSize() {
+      bubbleSizeSlider.value = String(settings.bubbleScale)
+      bubbleSizeText.textContent = Math.round(settings.bubbleScale * 100) + '%'
+      bubbleSizeSlider.setAttribute('aria-valuetext', bubbleSizeText.textContent)
+    }
+    bubbleSizeSlider.addEventListener('input', function () {
+      settings.bubbleScale = Math.min(1.6, Math.max(0.8, Number(bubbleSizeSlider.value) || 1))
+      syncBubbleSize()
+      if (deps.refreshBubble) deps.refreshBubble()
+      saveSettings(false)
+    })
+    bubbleSizeWrap.append(bubbleSizeSlider, bubbleSizeText)
+    bubbleSizeRow.appendChild(bubbleSizeWrap)
+
+    var followRow = row('跟随桌宠缩放')
+    var followBtn = document.createElement('button')
+    followBtn.type = 'button'
+    followBtn.setAttribute('aria-label', '跟随桌宠缩放')
+    followBtn.style.cssText = 'padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.18);' +
+      'background:rgba(255,255,255,.06);color:#dfe4f0;font:inherit;cursor:pointer'
+    function syncFollowBtn() {
+      followBtn.textContent = settings.bubbleFollowSize ? '开' : '关'
+      followBtn.style.background = settings.bubbleFollowSize ? 'rgba(125,134,255,.85)' : 'rgba(255,255,255,.06)'
+      followBtn.style.color = settings.bubbleFollowSize ? '#fff' : '#dfe4f0'
+      followBtn.setAttribute('aria-pressed', settings.bubbleFollowSize ? 'true' : 'false')
+      followBtn.title = settings.bubbleFollowSize
+        ? '气泡字号会随桌宠大小一起缩放，点击关闭'
+        : '气泡字号固定，不随桌宠大小变化，点击开启'
+    }
+    followBtn.addEventListener('click', function () {
+      settings.bubbleFollowSize = !settings.bubbleFollowSize
+      syncFollowBtn()
+      if (deps.refreshBubble) deps.refreshBubble()
+      saveSettings(true)
+    })
+    syncFollowBtn()
+    followRow.appendChild(followBtn)
 
     // 透明度
     var opaRow = row('透明度')
@@ -508,7 +584,10 @@ export function createPanel(deps) {
 
     document.body.appendChild(panel)
     syncMirrorButtons()
-    return { syncMirrorButtons, slider, sizeText, syncFps, voiceQueues }
+    return {
+      syncMirrorButtons, slider, sizeText, syncFps, syncLock: syncLockBtn, syncHoverLock: syncHoverLockBtn,
+      syncBubbleSize, syncFollowBtn, voiceQueues,
+    }
   }
 
   var panelApi = null
@@ -519,6 +598,10 @@ export function createPanel(deps) {
       panelApi.sizeText.textContent = Math.round(settings.size * 100) + '%'
       panelApi.syncFps()
       panelApi.syncMirrorButtons()
+      panelApi.syncLock()
+      panelApi.syncHoverLock()
+      panelApi.syncBubbleSize()
+      panelApi.syncFollowBtn()
     }
     panel.style.display = 'block'
     if (panelApi.voiceQueues.menu.open) panelApi.voiceQueues.refresh()
@@ -553,5 +636,8 @@ export function createPanel(deps) {
     panelApi = null
   }
 
-  return { open: openPanel, close: closePanel, isOpen: panelIsOpen, contains: insidePanel, dispose: dispose }
+  return {
+    open: openPanel, close: closePanel, isOpen: panelIsOpen, contains: insidePanel, dispose: dispose,
+    syncLock: function () { if (panelApi) panelApi.syncLock() },
+  }
 }

@@ -27,7 +27,9 @@ export function saveSettings(immediate) {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
       mirror: settings.mirror, size: settings.size, fps: settings.fps,
-      bubble: settings.bubble, dragLock: settings.dragLock, alwaysOnTop: settings.alwaysOnTop,
+      bubble: settings.bubble, bubbleScale: settings.bubbleScale,
+      bubbleFollowSize: settings.bubbleFollowSize, showHoverLock: settings.showHoverLock,
+      dragLock: settings.dragLock, alwaysOnTop: settings.alwaysOnTop,
       opacity: settings.opacity,
       sound: settings.sound, volume: settings.volume,
       voice: settings.voice, voiceLanguage: settings.voiceLanguage, voiceVolume: settings.voiceVolume,

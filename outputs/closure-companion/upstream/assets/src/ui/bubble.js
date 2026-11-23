@@ -45,15 +45,10 @@ export function createBubble(deps) {
   // 结构：一个 fixed 容器里放「SVG 背景（像素边框 + 硬阴影）+ 文本层」，
   // 文本用 Ark Pixel 12px 像素字体；整体 pointer-events:none，不挡下面 UI。
   var BUBBLE_FONT = '"ArkPixel12", ui-monospace, monospace'
-  // 像素字体是 12px 设计的矢量轮廓：只有按整数倍渲染才严格清晰，
-  // 所以用 24px（2×）—— 16px 那种 1.33× 会出现粗细不均。
-  var BUBBLE_SIZE = 24
-  var BUBBLE_LINE = 28
-  var BUBBLE_PAD = 12
+  // 像素字体是 12px 设计的矢量轮廓：默认按 24px（2×）渲染最清晰。
+  var BUBBLE_BASE_SIZE = 24
+  var BUBBLE_BASE_MAX_W = 330
   var BUBBLE_HIDE_MS = 5200
-  var BUBBLE_CORNER = 6
-  var TAIL_W = 14
-  var TAIL_H = 10
   var bubbleEl = null
   var bubbleTextEl = null
   var bubbleTailEl = null
@@ -62,6 +57,26 @@ export function createBubble(deps) {
   var bubbleH = 0
   var bubbleHideTimer = 0
   var bubbleTickTimer = 0
+
+  function metrics() {
+    var follow = settings.bubbleFollowSize !== false
+    var scale = Number(settings.bubbleScale) || 1
+    var raw = BUBBLE_BASE_SIZE * (follow ? settings.size : 1) * scale
+    // 对齐到偶数像素，保证像素边缘清晰
+    var fontSize = Math.ceil(Math.min(72, Math.max(12, Math.round(raw))) / 2) * 2
+    return {
+      font: BUBBLE_FONT,
+      fontSize: fontSize,
+      line: Math.round(fontSize * 7 / 6),
+      pad: Math.round(fontSize / 2),
+      maxW: Math.round(BUBBLE_BASE_MAX_W * fontSize / BUBBLE_BASE_SIZE),
+      corner: Math.round(fontSize / 4),
+      tailW: Math.round(fontSize * 7 / 12),
+      tailH: Math.round(fontSize * 5 / 12),
+      stroke: Math.max(2, Math.round(fontSize / 12)),
+      shadow: Math.max(2, Math.round(fontSize / 8)),
+    }
+  }
 
   function hideBubble() {
     bubbleShown = false
@@ -113,11 +128,12 @@ export function createBubble(deps) {
     bubbleEl.appendChild(bubbleSvg)
 
     bubbleTextEl = document.createElement('div')
+    var initial = metrics()
     bubbleTextEl.style.cssText = [
       'position:absolute', 'white-space:pre',
-      'font-family:' + BUBBLE_FONT,
-      'font-size:' + BUBBLE_SIZE + 'px',
-      'line-height:' + BUBBLE_LINE + 'px',
+      'font-family:' + initial.font,
+      'font-size:' + initial.fontSize + 'px',
+      'line-height:' + initial.line + 'px',
       'color:#20232a', 'letter-spacing:0',
       '-webkit-font-smoothing:none', 'font-smooth:never',
       'text-rendering:geometricPrecision',
@@ -127,25 +143,24 @@ export function createBubble(deps) {
     document.body.appendChild(bubbleEl)
   }
 
-  var BUBBLE_MAX_W = 330 // 单行最大宽度（CSS px），超出按字符折行
-
-  function measureText(text) {
+  function measureText(text, m) {
     var cv = measureText._cv || (measureText._cv = document.createElement('canvas'))
     var ctx = cv.getContext('2d')
-    ctx.font = BUBBLE_SIZE + 'px ' + BUBBLE_FONT
+    m = m || metrics()
+    ctx.font = m.fontSize + 'px ' + m.font
     return ctx.measureText(text).width
   }
 
   /** 按像素宽度折行：优先在空格处断（英文），中文按字符断 */
-  function wrapText(text, maxWidth) {
-    if (measureText(text) <= maxWidth) return [text]
+  function wrapText(text, maxWidth, m) {
+    if (measureText(text, m) <= maxWidth) return [text]
     var out = []
     var cur = ''
     var lastSpace = -1
     for (var i = 0; i < text.length; i++) {
       var ch = text.charAt(i)
-      if (cur && measureText(cur + ch) > maxWidth) {
-        if (lastSpace > 0 && measureText(cur.slice(0, lastSpace)) > maxWidth * 0.45) {
+      if (cur && measureText(cur + ch, m) > maxWidth) {
+        if (lastSpace > 0 && measureText(cur.slice(0, lastSpace), m) > maxWidth * 0.45) {
           out.push(cur.slice(0, lastSpace))
           cur = cur.slice(lastSpace + 1) + ch
         } else {
@@ -164,10 +179,10 @@ export function createBubble(deps) {
 
   // 像素气泡外框：四角切 4px 斜角；尾巴默认朝下（气泡在桌宠上方），
   // 桌面边缘放不下时气泡翻到下方，尾巴改为朝上。
-  function bubblePath(w, h, tailX, tailUp) {
-    var c = BUBBLE_CORNER
-    var t = TAIL_H
-    var tw = TAIL_W
+  function bubblePath(w, h, tailX, tailUp, m) {
+    var c = m.corner
+    var t = m.tailH
+    var tw = m.tailW
     if (!tailUp) {
       var bodyH = h - t
       return [
@@ -187,6 +202,7 @@ export function createBubble(deps) {
   function renderBubble(lines, tailCenterX, tailUp) {
     ensureFont()
     ensureBubble()
+    var m = metrics()
     // 折行规则：
     //   1) 文本里**显式写的 `\n` 优先作为硬换行**（调用方自己控制分行）；
     //   2) 每段再按像素宽度软折行，避免单行把气泡拉得过宽。
@@ -196,37 +212,41 @@ export function createBubble(deps) {
     for (var li = 0; li < lines.length; li++) {
       var segments = String(lines[li]).split(/\r?\n/)
       for (var si = 0; si < segments.length; si++) {
-        var parts = wrapText(segments[si], BUBBLE_MAX_W)
+        var parts = wrapText(segments[si], m.maxW, m)
         for (var pi = 0; pi < parts.length; pi++) wrapped.push(parts[pi])
       }
     }
     lines = wrapped
     var widest = 0
-    for (var i = 0; i < lines.length; i++) widest = Math.max(widest, measureText(lines[i]))
-    var w = Math.ceil(widest) + BUBBLE_PAD * 2 + 4
-    var h = lines.length * BUBBLE_LINE + BUBBLE_PAD * 2 + TAIL_H
+    for (var i = 0; i < lines.length; i++) widest = Math.max(widest, measureText(lines[i], m))
+    var w = Math.ceil(widest) + m.pad * 2 + 4
+    var h = lines.length * m.line + m.pad * 2 + m.tailH
     // 对齐到偶数像素，保证像素边缘清晰
     w = Math.ceil(w / 2) * 2
     h = Math.ceil(h / 2) * 2
     bubbleW = w
     bubbleH = h
     // 容器本身没有内容流（子元素全是绝对定位），必须显式给尺寸
-    bubbleEl.style.width = (w + 6) + 'px'
-    bubbleEl.style.height = (h + 6) + 'px'
+    var margin = m.shadow + 3
+    bubbleEl.style.width = (w + margin) + 'px'
+    bubbleEl.style.height = (h + margin) + 'px'
 
     var tailX = Math.round(Math.min(
-      Math.max(8, (tailCenterX || w / 2) - TAIL_W / 2),
-      w - TAIL_W - 8,
+      Math.max(8, (tailCenterX || w / 2) - m.tailW / 2),
+      w - m.tailW - 8,
     ))
-    bubbleSvg.setAttribute('width', String(w + 6))
-    bubbleSvg.setAttribute('height', String(h + 6))
-    bubbleSvg.setAttribute('viewBox', `0 0 ${w + 6} ${h + 6}`)
+    bubbleSvg.setAttribute('width', String(w + margin))
+    bubbleSvg.setAttribute('height', String(h + margin))
+    bubbleSvg.setAttribute('viewBox', `0 0 ${w + margin} ${h + margin}`)
     bubbleSvg.innerHTML =
-      '<path d="' + bubblePath(w, h, tailX, tailUp) + '" fill="#000" fill-opacity=".32" transform="translate(3,3)"/>' +
-      '<path d="' + bubblePath(w, h, tailX, tailUp) + '" fill="#ffffff" stroke="#20232a" stroke-width="2"/>'
+      '<path d="' + bubblePath(w, h, tailX, tailUp, m) + '" fill="#000" fill-opacity=".32" transform="translate(' + m.shadow + ',' + m.shadow + ')"/>' +
+      '<path d="' + bubblePath(w, h, tailX, tailUp, m) + '" fill="#ffffff" stroke="#20232a" stroke-width="' + m.stroke + '"/>'
 
-    bubbleTextEl.style.left = (BUBBLE_PAD + 2) + 'px'
-    bubbleTextEl.style.top = ((tailUp ? TAIL_H : 0) + BUBBLE_PAD + 1) + 'px'
+    bubbleTextEl.style.fontFamily = m.font
+    bubbleTextEl.style.fontSize = m.fontSize + 'px'
+    bubbleTextEl.style.lineHeight = m.line + 'px'
+    bubbleTextEl.style.left = (m.pad + 2) + 'px'
+    bubbleTextEl.style.top = ((tailUp ? m.tailH : 0) + m.pad + 1) + 'px'
     bubbleTextEl.textContent = lines.join('\n')
   }
 
@@ -283,6 +303,7 @@ export function createBubble(deps) {
   function placeBubble() {
     if (!bubbleEl || !pet.pos) return { tailCenter: bubbleW / 2, below: false }
     var s = size()
+    var m = metrics()
     var centerX = pet.pos.x + s.w / 2
     // 尾巴不放在正中：气泡主体朝屏幕内侧展开，尾巴落在宽度的 32% / 68% 处
     var ratio = centerX < window.innerWidth / 2 ? 0.32 : 0.68
@@ -298,8 +319,8 @@ export function createBubble(deps) {
     bubbleEl.style.transformOrigin = below ? 'center top' : 'center bottom'
     // 尾巴仍然指向桌宠中心；气泡被夹到边缘时跟着偏移，但保证不贴边
     var tailCenter = Math.min(
-      Math.max(TAIL_W / 2 + 8, centerX - left),
-      Math.max(TAIL_W / 2 + 8, bubbleW - TAIL_W / 2 - 8),
+      Math.max(m.tailW / 2 + 8, centerX - left),
+      Math.max(m.tailW / 2 + 8, bubbleW - m.tailW / 2 - 8),
     )
     return { tailCenter: tailCenter, below: below }
   }
@@ -319,18 +340,27 @@ export function createBubble(deps) {
   }
 
   // 气泡显隐动画：像从桌宠头顶"冒"出来（底部为轴心），带一点回弹
+  // 默认用位移+淡入，避免缩放过程中文字位图被拉伸而短暂发糊。
+  // 如需回退到旧的缩放动画，把这里改成 'scale' 即可。
+  var BUBBLE_POP_MODE = 'fade' // 'fade' | 'scale'
   var bubbleShown = false
   function popBubbleIn() {
     if (!bubbleEl) return
     bubbleEl.style.opacity = '1'
     try { bubbleEl.getAnimations().forEach(function (a) { a.cancel() }) } catch (err) {}
     try {
-      bubbleEl.animate([
+      var frames = BUBBLE_POP_MODE === 'scale' ? [
         { opacity: 0, transform: 'scale(.62,.7) translateY(10px)' },
         { opacity: 1, transform: 'scale(1.06,1.03) translateY(-2px)', offset: 0.62 },
         { opacity: 1, transform: 'scale(.98,1.01) translateY(1px)', offset: 0.8 },
         { opacity: 1, transform: 'scale(1,1) translateY(0)' },
-      ], { duration: 320, easing: 'cubic-bezier(.22,1.5,.36,1)', fill: 'forwards' })
+      ] : [
+        { opacity: 0, transform: 'translateY(10px)' },
+        { opacity: 1, transform: 'translateY(-2px)', offset: 0.62 },
+        { opacity: 1, transform: 'translateY(1px)', offset: 0.8 },
+        { opacity: 1, transform: 'translateY(0)' },
+      ]
+      bubbleEl.animate(frames, { duration: 320, easing: 'cubic-bezier(.22,1.5,.36,1)', fill: 'forwards' })
     } catch (err) {}
   }
 
@@ -338,10 +368,14 @@ export function createBubble(deps) {
     if (!bubbleEl) return
     try {
       bubbleEl.getAnimations().forEach(function (a) { a.cancel() })
-      bubbleEl.animate([
+      var frames = BUBBLE_POP_MODE === 'scale' ? [
         { opacity: 1, transform: 'scale(1,1)' },
         { opacity: 0, transform: 'scale(.92,.94) translateY(4px)' },
-      ], { duration: 180, easing: 'ease-in', fill: 'forwards' })
+      ] : [
+        { opacity: 1, transform: 'translateY(0)' },
+        { opacity: 0, transform: 'translateY(4px)' },
+      ]
+      bubbleEl.animate(frames, { duration: 180, easing: 'ease-in', fill: 'forwards' })
     } catch (err) {}
     bubbleEl.style.opacity = '0'
   }
