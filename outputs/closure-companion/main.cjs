@@ -147,6 +147,40 @@ function followCodex(win, report, onLost) {
   }
 }
 
+function watchFullscreen(win, report) {
+  const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const handle = win.getNativeWindowHandle()
+  const petHandle = handle.length === 8 ? handle.readBigUInt64LE() : handle.readUInt32LE()
+  const tracker = spawn(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(__dirname, 'fullscreen-watch.ps1'), '-PetHandle', String(petHandle),
+  ], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  const lines = readline.createInterface({ input: tracker.stdout })
+  let stopped = false
+  lines.on('line', (message) => {
+    if (stopped || win.isDestroyed()) return
+    try {
+      const { fullscreen } = JSON.parse(message)
+      if (typeof fullscreen === 'boolean') report(fullscreen)
+    } catch (error) {
+      console.error('Closure fullscreen watch:', error.message)
+    }
+  })
+  tracker.stderr.on('data', (chunk) => console.error('Closure fullscreen watch:', chunk.toString().trim()))
+  tracker.on('error', (error) => console.error('Closure fullscreen watch:', error.message))
+  tracker.once('close', () => {
+    if (!stopped && !win.isDestroyed()) report(false)
+  })
+  return () => {
+    stopped = true
+    lines.close()
+    tracker.kill()
+  }
+}
+
 function managePetWindow(win) {
   let mode = 'codex'
   let desktopDisplay
@@ -155,7 +189,13 @@ function managePetWindow(win) {
   let paused = false
   let ready = false
   let loaded = false
+  let fullscreen = false
+  let alwaysOnTop = true
   let tray
+
+  function applyTopmost() {
+    if (!win.isDestroyed()) win.setAlwaysOnTop(alwaysOnTop && !fullscreen, 'screen-saver')
+  }
 
   function syncWindow() {
     if (win.isDestroyed()) return
@@ -168,7 +208,7 @@ function managePetWindow(win) {
       bounds = screen.screenToDipRect(null, codexBounds)
     }
     if (bounds) win.setBounds(bounds)
-    if (ready && bounds && !paused) {
+    if (ready && bounds && !paused && !fullscreen) {
       if (!win.isVisible()) win.showInactive()
     } else if (win.isVisible()) {
       win.hide()
@@ -198,7 +238,7 @@ function managePetWindow(win) {
     tray?.destroy()
   })
 
-  return async (nextMode) => {
+  async function show(nextMode) {
     stopTracker?.()
     if (nextMode === 'standalone') {
       const display = loaded && win.isVisible()
@@ -230,6 +270,23 @@ function managePetWindow(win) {
     loaded = true
     ready = true
     syncWindow()
+  }
+
+  return {
+    show: show,
+    setFullscreen(next) {
+      next = next === true
+      if (fullscreen === next) return
+      fullscreen = next
+      applyTopmost()
+      syncWindow()
+    },
+    setAlwaysOnTop(next) {
+      next = next === true
+      if (alwaysOnTop === next) return
+      alwaysOnTop = next
+      applyTopmost()
+    },
   }
 }
 
@@ -275,6 +332,9 @@ async function runSmoke(win) {
     await delay(200)
   }
   if (phase !== 'running') throw new Error(`Spine failed to start: ${await evaluate('window.__dshClosurePet?.error') || phase}`)
+  await evaluate('window.__dshClosurePet?.setSettings?.({ alwaysOnTop: true })')
+  await delay(150)
+  if (!win.isAlwaysOnTop()) throw new Error('Always-on-top toggle did not reach the window.')
 
   const result = await evaluate(`(async () => {
     const pet = window.__dshClosurePet
@@ -377,6 +437,11 @@ async function runSmoke(win) {
     const dragLockButtonOn = lockButton.textContent === '已锁定' && getSavedSettings().dragLock === true
     lockButton.click()
     const dragLockButtonOff = lockButton.textContent === '未锁定' && getSavedSettings().dragLock === false
+    const topButton = [...settings.querySelectorAll('button')].find((button) => button.title.includes('全屏应用时自动隐藏'))
+    const alwaysOnTopButton = Boolean(topButton) && topButton.textContent === '开' &&
+      topButton.getAttribute('aria-pressed') === 'true'
+    topButton.click()
+    const alwaysOnTopOff = topButton.textContent === '关' && getSavedSettings().alwaysOnTop === false
     const fpsSlider = settings.querySelector('input[type="range"][aria-label="帧率"]')
     const { normalizeSettings } = await import('/dsh-closure/assets/src/shared/protocol.js')
     const fpsRange = fpsSlider.min === '30' && fpsSlider.max === '60' && fpsSlider.step === '1' &&
@@ -655,6 +720,7 @@ async function runSmoke(win) {
     }
     defaultMode.click()
     return { dragged, dragLockWorks, hoverLockWorks, dragLockButton: dragLockButton && dragLockButtonOn && dragLockButtonOff,
+      alwaysOnTopButton, alwaysOnTopOff,
       clicked, panelOpened, fpsSliderWorks, notificationsSaved, defaultQueues, defaultOverridesPersonal, queueEditor, voiceSettings, voiceVolumeWorks,
       startVoice, clickKeepsDialogue, startRotates, expressionPreview, crtSettingsSaved, startupScheduled,
       workingDialogue, workingOnlyOnce, completionDialogue, failedTurnSkipsCompletion, idleDialogue, idleOnlyOnce,
@@ -680,7 +746,10 @@ async function runSmoke(win) {
       getVoiceQueues(settings).start.join() === 'a18,a19,a21,a23,a24' &&
       getVoiceQueues(settings).toolFailure.join() === 'a31,a32' &&
       Object.values(oldProfile.voiceQueues).every((queue) => queue.length === 0) && getVoiceQueues(oldProfile).start[0] === 'a18'
-    return { queuesReloaded, fpsReloaded: settings.fps === 45, dragLockReloaded: settings.dragLock === false }
+    return {
+      queuesReloaded, fpsReloaded: settings.fps === 45, dragLockReloaded: settings.dragLock === false,
+      alwaysOnTopReloaded: settings.alwaysOnTop === false,
+    }
   })()`)
   if (!Object.values(reloaded).every(Boolean)) throw new Error(`Settings did not survive reload: ${JSON.stringify(reloaded)}`)
   console.log(JSON.stringify({ ...result, ...reloaded }))
@@ -721,10 +790,21 @@ if (!smoke && !app.requestSingleInstanceLock()) {
     })
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     win.webContents.on('will-navigate', (event) => event.preventDefault())
+    let petWindow
+    ipcMain.on('closure:always-on-top', (event, enabled) => {
+      if (event.sender !== win.webContents || typeof enabled !== 'boolean') return
+      if (petWindow) petWindow.setAlwaysOnTop(enabled)
+      else win.setAlwaysOnTop(enabled, 'screen-saver')
+    })
     if (!dev) {
       registerInput(win)
       win.webContents.once('render-process-gone', () => app.exit(1))
-      const showMode = managePetWindow(win)
+      petWindow = managePetWindow(win)
+      const showMode = petWindow.show
+      const stopFullscreenWatch = process.platform === 'win32'
+        ? watchFullscreen(win, (fullscreen) => petWindow.setFullscreen(fullscreen))
+        : undefined
+      win.once('closed', () => stopFullscreenWatch?.())
       let mode = 'standalone'
       if (forceStandalone) {
         try {

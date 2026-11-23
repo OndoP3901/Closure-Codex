@@ -29,6 +29,7 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   fps: FPS_MAX,
   bubble: true,
   dragLock: false,
+  alwaysOnTop: true,
   opacity: 1,
   sound: true,
   volume: 0.7,
@@ -68,6 +69,7 @@ export function normalizeSettings(raw, base) {
   if (Number.isFinite(raw.fps)) out.fps = Math.min(FPS_MAX, Math.max(FPS_MIN, Math.round(raw.fps)))
   if (typeof raw.bubble === 'boolean') out.bubble = raw.bubble
   if (typeof raw.dragLock === 'boolean') out.dragLock = raw.dragLock
+  if (typeof raw.alwaysOnTop === 'boolean') out.alwaysOnTop = raw.alwaysOnTop
   const opacity = Number(raw.opacity)
   if (Number.isFinite(opacity)) out.opacity = Math.min(1, Math.max(OPACITY_MIN, opacity))
   if (typeof raw.sound === 'boolean') out.sound = raw.sound

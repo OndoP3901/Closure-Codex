@@ -15,6 +15,7 @@ let bounds
 let quit = 0
 let scale = 1
 let trackerStopped = false
+let topmost = false
 tracker.stderr = new EventEmitter()
 tracker.kill = () => { trackerStopped = true }
 lines.close = () => {}
@@ -28,6 +29,7 @@ Object.assign(win, {
   showInactive: () => { visible = true },
   hide: () => { visible = false },
   setBounds: (rect) => { bounds = rect },
+  setAlwaysOnTop: (enabled) => { topmost = enabled },
   getBounds: () => bounds,
   loadURL: async () => {},
 })
@@ -42,13 +44,13 @@ class Tray {
   setContextMenu() {}
   destroy() {}
 }
-const switchMode = vm.runInNewContext(`${followCodex}\nmanagePetWindow(win)`, {
+const petWindow = vm.runInNewContext(`${followCodex}\nmanagePetWindow(win)`, {
   win, screen, path, __dirname, process, console, noTray: true, Tray, canvas: false,
   URLSearchParams, origin: 'closure-pet://local', Menu: { buildFromTemplate() {} },
   spawn: () => tracker, readline: { createInterface: () => lines }, app: { quit: () => { quit++ } },
 })
 async function checkWindow() {
-  await switchMode('codex')
+  await petWindow.show('codex')
   const report = (state) => lines.emit('line', JSON.stringify(state))
   const main = { visible: true, x: 0, y: 0, width: 1200, height: 800 }
   report(main)
@@ -67,15 +69,28 @@ async function checkWindow() {
   scale = 2
   screen.emit('display-metrics-changed')
   assert.equal(bounds.width, 600)
-  await switchMode('standalone')
+  await petWindow.show('standalone')
   assert.equal(trackerStopped, true)
   assert.equal(visible, true)
   assert.deepEqual(bounds, display.workArea)
+  petWindow.setFullscreen(true)
+  assert.equal(visible, false)
+  assert.equal(topmost, false)
+  petWindow.setFullscreen(false)
+  assert.equal(visible, true)
+  assert.equal(topmost, true)
+  petWindow.setAlwaysOnTop(false)
+  assert.equal(topmost, false)
+  petWindow.setFullscreen(true)
+  petWindow.setFullscreen(false)
+  assert.equal(topmost, false)
+  petWindow.setAlwaysOnTop(true)
+  assert.equal(topmost, true)
   report({ visible: false })
   tracker.emit('close')
   assert.equal(visible, true)
   assert.equal(quit, 0)
-  await switchMode('codex')
+  await petWindow.show('codex')
   assert.equal(visible, false)
   report(main)
   assert.equal(visible, true)

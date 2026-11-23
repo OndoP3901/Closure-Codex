@@ -312,6 +312,9 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
   function closePanel() { if (panelUi) panelUi.close() }
   function panelIsOpen() { return panelUi ? panelUi.isOpen() : false }
   function insidePanel(target) { return panelUi ? panelUi.contains(target) : false }
+  function syncAlwaysOnTop() {
+    try { window.closureCompanion?.setAlwaysOnTop?.(settings.alwaysOnTop === true) } catch (err) {}
+  }
 
   // ————————————————————— 交互：点击 / 拖拽 / 右键 —————————————————————
   // 实现在 input/drag.js；监听在组合阶段注册。
@@ -471,6 +474,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
     settings: settings, saveSettings: saveSettings, resolveFlip: resolveFlip,
     layout: layout, repositionForAnchor: repositionForAnchor, applyOpacity: applyOpacity,
     hideBubble: hideBubble, audioEnsure: audioEnsure, loadSounds: loadSounds, playSound: playSound,
+    setAlwaysOnTop: window.closureCompanion?.setAlwaysOnTop ? syncAlwaysOnTop : undefined,
     updateVoice: audio.stopVoice,
     previewVoice: (id) => {
       if (!settings.voice || document.hidden) return Promise.resolve(false)
@@ -494,6 +498,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
     showDialogue: bubbleApi.showDialogue,
     scheduleStartup: scheduleStartup,
     settings: settings, saveSettings: saveSettings,
+    syncAlwaysOnTop: syncAlwaysOnTop,
     layout: layout, repositionForAnchor: repositionForAnchor,
     resolveFlip: resolveFlip, applyOpacity: applyOpacity,
     isBubbleShown: function () { return !!(bubbleApi && bubbleApi.isShown()) },
@@ -600,6 +605,7 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
       applyOpacity()
       playLoop('Idle', true)
       start()
+      syncAlwaysOnTop()
       if (!standalone) startPolling()
       loadHostConfig()
       loadSounds()
@@ -617,7 +623,12 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
         openPanel: openPanel,
         closePanel: closePanel,
         setHover: function (x, y) { hoverLockUi.update(x, y) },
-        get settings() { return { mirror: settings.mirror, size: settings.size, bubble: settings.bubble, dragLock: settings.dragLock, opacity: settings.opacity, sound: settings.sound, volume: settings.volume } },
+        get settings() {
+          return {
+            mirror: settings.mirror, size: settings.size, bubble: settings.bubble, dragLock: settings.dragLock,
+            alwaysOnTop: settings.alwaysOnTop, opacity: settings.opacity, sound: settings.sound, volume: settings.volume,
+          }
+        },
         get split() { return INTERACT_SPLIT },
         setSettings: function (patch) {
           if (patch) {
@@ -625,11 +636,12 @@ import { createState, LOW_QUOTA_NOTICE } from './io/state.js'
             if (patch.size) settings.size = Number(patch.size)
             if (typeof patch.bubble === 'boolean') settings.bubble = patch.bubble
             if (typeof patch.dragLock === 'boolean') settings.dragLock = patch.dragLock
+            if (typeof patch.alwaysOnTop === 'boolean') settings.alwaysOnTop = patch.alwaysOnTop
             if (patch.opacity) settings.opacity = Number(patch.opacity)
             if (typeof patch.sound === 'boolean') settings.sound = patch.sound
             if (patch.volume !== undefined) settings.volume = Number(patch.volume)
           }
-          saveSettings(true); layout(); repositionForAnchor(); resolveFlip(); applyOpacity()
+          saveSettings(true); syncAlwaysOnTop(); layout(); repositionForAnchor(); resolveFlip(); applyOpacity()
           if (!settings.bubble) hideBubble()
         },
         resetPosition: resetPosition,

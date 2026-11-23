@@ -91,6 +91,29 @@ export function createPanel(deps) {
     syncLockBtn()
     lockRow.appendChild(lockBtn)
 
+    if (deps.setAlwaysOnTop) {
+      var topRow = row('置顶显示')
+      var topBtn = document.createElement('button')
+      topBtn.type = 'button'
+      topBtn.style.cssText = 'padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.18);' +
+        'background:rgba(255,255,255,.06);color:#dfe4f0;font:inherit;cursor:pointer'
+      function syncTopBtn() {
+        topBtn.textContent = settings.alwaysOnTop ? '开' : '关'
+        topBtn.style.background = settings.alwaysOnTop ? 'rgba(125,134,255,.85)' : 'rgba(255,255,255,.06)'
+        topBtn.style.color = settings.alwaysOnTop ? '#fff' : '#dfe4f0'
+        topBtn.setAttribute('aria-pressed', settings.alwaysOnTop ? 'true' : 'false')
+        topBtn.title = '开启后桌宠显示在所有窗口前面；进入全屏应用时自动隐藏'
+      }
+      topBtn.addEventListener('click', function () {
+        settings.alwaysOnTop = !settings.alwaysOnTop
+        syncTopBtn()
+        saveSettings(true)
+        deps.setAlwaysOnTop()
+      })
+      syncTopBtn()
+      topRow.appendChild(topBtn)
+    }
+
     // 镜像
     var mirrorRow = row('镜像')
     var segBox = document.createElement('span')

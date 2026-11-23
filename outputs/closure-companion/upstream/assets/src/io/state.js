@@ -31,6 +31,7 @@ export function createState(deps) {
   var resolveFlip = deps.resolveFlip
   var applyOpacity = deps.applyOpacity
   var isBubbleShown = deps.isBubbleShown
+  var syncAlwaysOnTop = deps.syncAlwaysOnTop
 
   // ————————————————————— P4：宿主状态轮询 —————————————————————
   // 每秒拉 /dsh-closure/state；用计数器增量识别事件（轮询丢帧也不会漏）。
@@ -237,6 +238,7 @@ export function createState(deps) {
         if (isFinite(Number(s.size))) settings.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, Number(s.size)))
         if (typeof s.bubble === 'boolean') settings.bubble = s.bubble
         if (typeof s.dragLock === 'boolean') settings.dragLock = s.dragLock
+        if (typeof s.alwaysOnTop === 'boolean') settings.alwaysOnTop = s.alwaysOnTop
         if (isFinite(Number(s.opacity))) settings.opacity = Math.min(1, Math.max(0.3, Number(s.opacity)))
         if (typeof s.sound === 'boolean') settings.sound = s.sound
         if (isFinite(Number(s.volume))) settings.volume = Math.min(1, Math.max(0, Number(s.volume)))
@@ -246,6 +248,7 @@ export function createState(deps) {
         repositionForAnchor()
         resolveFlip()
         applyOpacity()
+        if (syncAlwaysOnTop) syncAlwaysOnTop()
         saveSettings(true)
       })
       .catch(function () { /* 宿主不可用就沿用 localStorage */ })
