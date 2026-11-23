@@ -230,5 +230,6 @@ export function createDrag(deps) {
     try { document.documentElement.classList.remove('dshcl-dragging') } catch (err) {}
   }
 
-  return { isDragging: function () { return !!drag }, cancelDrag: cancelDrag, dispose: dispose }
+  // 只有真正越过拖拽阈值才算拖拽；普通点击不应让悬浮锁头闪一下。
+  return { isDragging: function () { return !!(drag && drag.moved) }, cancelDrag: cancelDrag, dispose: dispose }
 }

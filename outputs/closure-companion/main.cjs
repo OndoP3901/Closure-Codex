@@ -759,8 +759,16 @@ async function runSmoke(win) {
     } finally {
       Date.now = now
     }
+    pet.setHover(hostRect.left + 2, hostRect.top + 2)
+    await new Promise((done) => setTimeout(done, 3200))
+    const hoverLockAutoHides = lockIcon.style.opacity === '0'
+    pet.setHover(-200, -200)
+    pet.setHover(hostRect.left + 2, hostRect.top + 2)
+    const hoverLockReshows = lockIcon.style.opacity === '1'
+    pet.setHover(-200, -200)
     defaultMode.click()
     return { dragged, dragLockWorks, hoverLockWorks, dragLockButton: dragLockButton && dragLockButtonOn && dragLockButtonOff,
+      hoverLockAutoHides, hoverLockReshows,
       hoverLockSyncsPanel, hoverUnlockSyncsPanel, bubbleFollowsPet, bubbleScaleWorks, bubbleUnfollows,
       hoverLockDefaultOn, hoverLockHiddenBySetting, hoverLockShownAgain, bubbleRange,
       alwaysOnTopButton, alwaysOnTopOff,

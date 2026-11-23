@@ -31,6 +31,9 @@ export function createHoverLock(deps) {
     '</svg>'
   var shackle = button.querySelector('[data-lock-shackle]')
   var shown = false
+  var wasInside = false
+  var hideTimer = 0
+  var HOVER_LOCK_HIDE_MS = 3000
 
   function sync() {
     var locked = !!settings.dragLock
@@ -51,10 +54,42 @@ export function createHoverLock(deps) {
     button.style.pointerEvents = next ? 'auto' : 'none'
   }
 
+  function clearHideTimer() {
+    if (!hideTimer) return
+    clearTimeout(hideTimer)
+    hideTimer = 0
+  }
+
+  function scheduleHide() {
+    clearHideTimer()
+    hideTimer = setTimeout(function () {
+      hideTimer = 0
+      setShown(false)
+    }, HOVER_LOCK_HIDE_MS)
+  }
+
   function update(x, y) {
     var rect = host.getBoundingClientRect()
     var inside = x >= rect.left - 4 && x <= rect.right + 4 && y >= rect.top - 4 && y <= rect.bottom + 4
-    setShown(inside && settings.showHoverLock !== false && !panelIsOpen() && !isDragging())
+    var allowed = inside && settings.showHoverLock !== false && !panelIsOpen() && !isDragging()
+    if (!allowed) {
+      wasInside = false
+      clearHideTimer()
+      setShown(false)
+      return
+    }
+    // 指针停在锁头上时保持显示，方便点击；自动收起后不会被它重新唤醒。
+    if (shown) {
+      var b = button.getBoundingClientRect()
+      if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) {
+        scheduleHide()
+        return
+      }
+    }
+    if (wasInside) return
+    wasInside = true
+    setShown(true)
+    scheduleHide()
   }
 
   function contains(target) {

@@ -57,6 +57,9 @@ export function createBubble(deps) {
   var bubbleH = 0
   var bubbleHideTimer = 0
   var bubbleTickTimer = 0
+  var fontReady = false
+  var fontPromise = null
+  var pendingBubble = null
 
   function metrics() {
     var follow = settings.bubbleFollowSize !== false
@@ -97,18 +100,45 @@ export function createBubble(deps) {
   var bubbleMode = 'info'
 
   function ensureFont() {
-    if (document.getElementById('dsh-closure-pet-font')) return
-    var st = document.createElement('style')
-    st.id = 'dsh-closure-pet-font'
-    st.textContent = '@font-face{font-family:ArkPixel12;src:url("' + PREFIX
-      + '/assets/fonts/ark-pixel-12px-zh_hans.woff2") format("woff2");font-display:block}'
-    document.head.appendChild(st)
-    // 字体是异步加载的：加载完重排一次，避免用回退字体量错宽度
+    if (fontPromise) return fontPromise
+    if (!document.getElementById('dsh-closure-pet-font')) {
+      var st = document.createElement('style')
+      st.id = 'dsh-closure-pet-font'
+      st.textContent = '@font-face{font-family:ArkPixel12;src:url("' + PREFIX
+        + '/assets/fonts/ark-pixel-12px-zh_hans.woff2") format("woff2");font-display:swap}'
+      document.head.appendChild(st)
+    }
+    // 字体加载完成前先不画气泡，避免先显示回退字体再切换的"发糊"。
+    // 加载失败或超时就退回系统等宽字体，保证气泡仍然能显示。
     try {
-      document.fonts.load('12px ArkPixel12').then(function () {
+      var timer = setTimeout(function () {
+        if (fontReady) return
+        fontReady = true
+        fontPromise = Promise.resolve()
+        flushPendingBubble()
+      }, 600)
+      fontPromise = document.fonts.load('24px ArkPixel12').then(function () {
+        clearTimeout(timer)
+        fontReady = true
         if (bubbleShown) refreshBubble()
-      }).catch(function () {})
-    } catch (err) {}
+        flushPendingBubble()
+      }).catch(function () {
+        clearTimeout(timer)
+        fontReady = true
+        flushPendingBubble()
+      })
+    } catch (err) {
+      fontReady = true
+      fontPromise = Promise.resolve()
+    }
+    return fontPromise
+  }
+
+  function flushPendingBubble() {
+    if (!fontReady || !pendingBubble) return
+    var request = pendingBubble
+    pendingBubble = null
+    showBubble.apply(null, request)
   }
 
   function ensureBubble() {
@@ -119,7 +149,7 @@ export function createBubble(deps) {
       'position:fixed', 'left:0', 'top:0', 'z-index:2147481999',
       'pointer-events:none', 'opacity:0',
       'transform-origin:center bottom',
-      'filter:none',
+      'filter:none', 'user-select:none', '-webkit-user-select:none',
     ].join(';')
 
     bubbleSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -340,9 +370,10 @@ export function createBubble(deps) {
   }
 
   // 气泡显隐动画：像从桌宠头顶"冒"出来（底部为轴心），带一点回弹
-  // 默认用位移+淡入，避免缩放过程中文字位图被拉伸而短暂发糊。
-  // 如需回退到旧的缩放动画，把这里改成 'scale' 即可。
-  var BUBBLE_POP_MODE = 'fade' // 'fade' | 'scale'
+  // 默认只做透明度变化：任何位移/缩放都会让 Chromium 合成文字层，
+  // 产生亚像素偏移，看起来短暂发糊。
+  // 回退选项：'slide'（淡入+位移）或 'scale'（旧缩放动画）。
+  var BUBBLE_POP_MODE = 'fade' // 'fade' | 'slide' | 'scale'
   var bubbleShown = false
   function popBubbleIn() {
     if (!bubbleEl) return
@@ -354,11 +385,14 @@ export function createBubble(deps) {
         { opacity: 1, transform: 'scale(1.06,1.03) translateY(-2px)', offset: 0.62 },
         { opacity: 1, transform: 'scale(.98,1.01) translateY(1px)', offset: 0.8 },
         { opacity: 1, transform: 'scale(1,1) translateY(0)' },
-      ] : [
+      ] : BUBBLE_POP_MODE === 'slide' ? [
         { opacity: 0, transform: 'translateY(10px)' },
         { opacity: 1, transform: 'translateY(-2px)', offset: 0.62 },
         { opacity: 1, transform: 'translateY(1px)', offset: 0.8 },
         { opacity: 1, transform: 'translateY(0)' },
+      ] : [
+        { opacity: 0 },
+        { opacity: 1 },
       ]
       bubbleEl.animate(frames, { duration: 320, easing: 'cubic-bezier(.22,1.5,.36,1)', fill: 'forwards' })
     } catch (err) {}
@@ -371,9 +405,12 @@ export function createBubble(deps) {
       var frames = BUBBLE_POP_MODE === 'scale' ? [
         { opacity: 1, transform: 'scale(1,1)' },
         { opacity: 0, transform: 'scale(.92,.94) translateY(4px)' },
-      ] : [
+      ] : BUBBLE_POP_MODE === 'slide' ? [
         { opacity: 1, transform: 'translateY(0)' },
         { opacity: 0, transform: 'translateY(4px)' },
+      ] : [
+        { opacity: 1 },
+        { opacity: 0 },
       ]
       bubbleEl.animate(frames, { duration: 180, easing: 'ease-in', fill: 'forwards' })
     } catch (err) {}
@@ -412,6 +449,11 @@ export function createBubble(deps) {
 
   function showBubble(eventText, eventMs, clickedLine = '', mode = 'info') {
     if (!settings.bubble) return
+    if (!fontReady) {
+      pendingBubble = [eventText, eventMs, clickedLine, mode]
+      ensureFont()
+      return
+    }
     taskDialogueShown = false
     audio.stopVoice()
     ensureFont()
@@ -428,8 +470,9 @@ export function createBubble(deps) {
     }
     if (!refreshBubble()) return
     bubbleShown = true
-    // 新内容才重新"弹"一次；只是刷新数字时不打断动画
-    if (!wasVisible || eventText || clickedLine || mode === 'quota') popBubbleIn()
+    // 只在气泡从无到有时弹一次。连续点击时保持当前气泡稳定，
+    // 避免反复从透明淡入导致阴影/背景透出。
+    if (!wasVisible) popBubbleIn()
     else bubbleEl.style.opacity = '1'
     // ⚠️ 事件气泡到"文字过期"就收起，**不能**拖到 5.2s：
     //    否则过期后内容会回落成余额/花费，看起来像"思考中突然弹余额"。
@@ -476,6 +519,9 @@ export function createBubble(deps) {
     bubbleTailEl = null
     bubbleSvg = null
   }
+
+  // 启动即预加载像素字体，避免第一次弹气泡时才下载并切换字体。
+  ensureFont()
 
   return { show: showBubble, showDialogue, showQuota: showQuota, showInteraction: showInteraction, refresh: refreshBubble, hide: hideBubble, dispose: dispose, isShown: function () { return bubbleShown } }
 }
