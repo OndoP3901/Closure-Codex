@@ -1,4 +1,4 @@
-可露希尔 · Codex Windows 移植 v0.6.0
+可露希尔 · Codex Windows 移植 v0.6.1
 
 安装、主题启用、桌宠设置与卸载步骤见上一级目录的 README.md。
 
@@ -7,6 +7,7 @@
 自动沿用原账号和聊天，加载配色、字体、顶部菜单栏与 CRT，无需手动导入。
 后续使用创建的“Codex - 可露希尔深色主题”快捷方式直接启动，即使完全退出后也不再重启。
 恢复原外观：双击上一级目录的 Restore-Codex-Appearance.vbs。
+恢复后再次启用：直接运行 Enable-Codex-Theme.vbs，无需提前打开 Codex；它会重新创建主题快捷方式。
 启动失败时会显示错误和日志位置；上一级 tools 文件夹中的 CMD 加 --debug 参数可查看控制台输出。
 
 桌宠由 Install.cmd 安装；手动启动使用 outputs/Start-Closure.cmd。

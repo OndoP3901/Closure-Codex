@@ -1,5 +1,5 @@
 param(
-    [string] $Version = '0.6.0',
+    [string] $Version = '0.6.1',
     [string] $ElectronZip = (Join-Path $PSScriptRoot 'work/companion-runtime/electron-mirror.zip'),
     [string] $ElectronDirectory = (Join-Path $PSScriptRoot 'work/companion-runtime/electron'),
     [string] $Destination = (Join-Path $PSScriptRoot 'dist')
@@ -38,6 +38,8 @@ try {
     foreach ($file in 'Install.cmd','Uninstall.cmd','Enable-Codex-Theme.vbs','Restore-Codex-Appearance.vbs','Setup.ps1','README.md','CHANGELOG.md') {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $packagePath
     }
+    $guides = New-Item -ItemType Directory -Path (Join-Path $packagePath 'docs')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/USAGE.md') -Destination $guides.FullName
     $debugTools = New-Item -ItemType Directory -Path (Join-Path $packagePath 'tools')
     foreach ($file in 'Enable-Codex-Theme.cmd','Restore-Codex-Appearance.cmd') {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot "tools/$file") -Destination $debugTools.FullName

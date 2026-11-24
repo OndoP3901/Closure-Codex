@@ -1,13 +1,15 @@
 param(
-    [string] $PackagePath = (Join-Path $PSScriptRoot '../dist/v0.6.0/Closure-Codex-v0.6.0-win-x64.zip'),
+    [string] $PackagePath,
     [string] $OutputDirectory = (Join-Path $PSScriptRoot '../work/release-clean-install')
 )
 $ErrorActionPreference = 'Stop'
+$version = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot '../outputs/closure-companion/package.json')) | ConvertFrom-Json).version
+if (!$PackagePath) { $PackagePath = Join-Path $PSScriptRoot "../dist/v$version/Closure-Codex-v$version-win-x64.zip" }
 $output = (New-Item -ItemType Directory -Path $OutputDirectory -Force).FullName
 $runRoot = (New-Item -ItemType Directory -Path (Join-Path $output ('全新安装 & 空格-' + [guid]::NewGuid().ToString('N')))).FullName
 $extract = (New-Item -ItemType Directory -Path (Join-Path $runRoot 'extracted')).FullName
 $startup = (New-Item -ItemType Directory -Path (Join-Path $runRoot 'startup')).FullName
-$report = [ordered]@{ passed=$false; version='0.6.0'; scope='Same Windows host, isolated extraction and empty profiles; private Startup folder; external Node excluded from PATH'; installScope='Setup.ps1 with private StartupFolder and SkipStart; actual Windows login was not exercised'; os=[Environment]::OSVersion.VersionString; runRoot=$runRoot; checks=@() }
+$report = [ordered]@{ passed=$false; version=$version; scope='Same Windows host, isolated extraction and empty profiles; private Startup folder; external Node excluded from PATH'; installScope='Setup.ps1 with private StartupFolder and SkipStart; actual Windows login was not exercised'; os=[Environment]::OSVersion.VersionString; runRoot=$runRoot; checks=@() }
 $original = @{}
 foreach ($name in 'PATH','ELECTRON_RUN_AS_NODE','CLOSURE_STATE_DIR','CLOSURE_BUBBLE_PNG','CODEX_HOME','LOCALAPPDATA','CLOSURE_TEST_PACKAGE_ROOT','CLOSURE_TEST_OUTPUT') {
     $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -34,7 +36,7 @@ try {
     $report.package = $resolvedZip
     $report.sha256 = (Get-FileHash -LiteralPath $resolvedZip).Hash.ToLowerInvariant()
     [IO.Compression.ZipFile]::ExtractToDirectory($resolvedZip, $extract)
-    $package = Join-Path $extract 'Closure-Codex-v0.6.0-win-x64'
+    $package = Join-Path $extract "Closure-Codex-v$version-win-x64"
     $runtime = Join-Path $package 'work/companion-runtime/electron/electron.exe'
     $profile = Join-Path $package 'work/companion-profile'
     Assert-Check (!(Test-Path -LiteralPath $profile)) 'archive has no preexisting pet profile'

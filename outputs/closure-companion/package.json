@@ -1,6 +1,6 @@
 {
   "name": "closure-codex-companion",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Local Closure desktop pet for Codex on Windows",
   "main": "main.cjs"
