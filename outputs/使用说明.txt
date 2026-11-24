@@ -1,4 +1,4 @@
-可露希尔 · Codex Windows 移植 v0.6.1
+可露希尔 · Codex / DSH / WorkBuddy Windows 移植 v0.7.0
 
 安装、主题启用、桌宠设置与卸载步骤见上一级目录的 README.md。
 
@@ -11,6 +11,10 @@
 启动失败时会显示错误和日志位置；上一级 tools 文件夹中的 CMD 加 --debug 参数可查看控制台输出。
 
 桌宠由 Install.cmd 安装；手动启动使用 outputs/Start-Closure.cmd。
-右键菜单分别控制 Codex 联动、桌面和其他软件显示、开机自启，底部可退出桌宠。
+右键菜单分别控制 Codex、DSH、WorkBuddy 联动、桌面和其他软件显示、开机自启，底部可退出桌宠。
+左键互动，按住拖动，中键手动查看所有已连接工具的账户余额，不再自动弹出余额。
+提示与语音跟随所有工具中最近有真实活动的对话，切换不补播旧提示。
+DSH 主题与联动插件分别位于 plugins/dsh-theme 和 plugins/dsh-companion，需在 DSH 中安装。
+WorkBuddy 主题入口为 Enable-WorkBuddy-Theme.vbs；仅桌宠联动使用 Start-WorkBuddy-Companion.vbs。
 「对话字号」可调 12–36 px，「气泡大小」可调 60%–160%，两项独立保存并即时生效。
 work/companion-profile 是个人桌宠设置，work/companion-runtime 是运行时，请勿当作缓存删除。

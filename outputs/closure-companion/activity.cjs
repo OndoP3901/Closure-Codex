@@ -26,10 +26,11 @@ function createActivity(enabled, sessionsRoot) {
   let rateLimits = { at: 0, windows: [] }
   let watcher
 
-  function noteUserInput(scene, notify) {
+  function noteUserInput(scene, notify, session) {
     if (!notify) return
     userInput.seq++
     userInput.scene = scene
+    session.signals.userInput = { seq: session.signals.userInput.seq + 1, scene }
   }
 
   function trackUserInput(event, session, notify) {
@@ -38,7 +39,7 @@ function createActivity(enabled, sessionsRoot) {
       if (event.name === 'request_user_input') {
         if (session.inputCalls.has(event.call_id)) return
         session.inputCalls.set(event.call_id, false)
-        noteUserInput('question', notify)
+        noteUserInput('question', notify, session)
       } else if (event.name === 'request_user_input_async') {
         session.inputCalls.set(event.call_id, true)
       }
@@ -48,17 +49,17 @@ function createActivity(enabled, sessionsRoot) {
       const output = parseToolOutput(event.output)
       if (asynchronous && output?.accepted === true) {
         session.awaitingAnswers++
-        noteUserInput('question', notify)
+        noteUserInput('question', notify, session)
       } else if (!asynchronous && Object.values(output?.answers ?? {}).some((answer) =>
         Array.isArray(answer?.answers) && answer.answers.some((text) => typeof text === 'string' && text.trim())
       )) {
-        noteUserInput('answer', notify)
+        noteUserInput('answer', notify, session)
       }
     } else if (session.awaitingAnswers && event.type === 'message' && event.role === 'user' &&
       event.content?.some?.(({ type, text }) => type === 'input_text' && typeof text === 'string' &&
         text.startsWith('<send_user_message_question_reply>') && text.trimEnd().endsWith('</send_user_message_question_reply>'))) {
       session.awaitingAnswers--
-      noteUserInput('answer', notify)
+      noteUserInput('answer', notify, session)
     }
   }
 
@@ -74,6 +75,10 @@ function createActivity(enabled, sessionsRoot) {
     }
     if (record.type === 'response_item') {
       trackUserInput(event, session, notify)
+      if (['function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output'].includes(event.type) ||
+          event.type === 'message' && ['user', 'assistant'].includes(event.role)) {
+        if (Number.isFinite(at)) session.activityAt = Math.max(session.activityAt, at)
+      }
       if (session.turn && event.type === 'message' && event.role === 'assistant') {
         session.mode = 'outputting'
         if (Number.isFinite(at)) {
@@ -88,6 +93,7 @@ function createActivity(enabled, sessionsRoot) {
     if (event.type === 'token_count') {
       const total = event.info?.total_token_usage?.total_tokens
       if (Number.isSafeInteger(total) && total >= 0 && Number.isFinite(at)) {
+        const changed = total !== session.totalTokens
         if (session.turn && (session.turnStartTokens === null || total < session.totalTokens)) {
           const last = event.info.last_token_usage?.total_tokens
           session.turnStartTokens = Number.isSafeInteger(last) && last >= 0 && last <= total ? total - last : null
@@ -96,7 +102,7 @@ function createActivity(enabled, sessionsRoot) {
         if (session.turn) {
           session.turnTokens = session.turnStartTokens === null ? null : total - session.turnStartTokens
         }
-        session.activityAt = Math.max(session.activityAt, at)
+        if (changed) session.activityAt = Math.max(session.activityAt, at)
       }
       const limits = event.rate_limits
       if (!limits || (limits.limit_id && limits.limit_id !== 'codex') || !Number.isFinite(at) || at < rateLimits.at) return
@@ -110,7 +116,7 @@ function createActivity(enabled, sessionsRoot) {
 
     if (event.type === 'task_started') {
       if (typeof event.turn_id !== 'string' || session.turn === event.turn_id) return
-      if (notify && !session.subagent) turnStartSeq++
+      if (notify && !session.subagent) { turnStartSeq++; session.signals.turnStartSeq++ }
       session.turn = event.turn_id
       session.mode = 'thinking'
       session.error = null
@@ -140,15 +146,18 @@ function createActivity(enabled, sessionsRoot) {
         tools.fail++
         tools.lastFailName = publicToolNames.has(item.tool) ? item.tool : ''
         tools.lastFailReason = summarizeToolError(item)
+        session.signals.tools = { ...tools, ok: session.signals.tools.ok, fail: session.signals.tools.fail + 1 }
       }
-      else if (notify && item.status === 'completed' && (item.exit_code ?? 0) === 0) tools.ok++
+      else if (notify && item.status === 'completed' && (item.exit_code ?? 0) === 0) { tools.ok++; session.signals.tools.ok++ }
     } else if (event.type === 'error' && !event.will_retry && !event.willRetry) {
       session.talkUntil = 0
       const details = event.error ?? event
       session.error = { reason: summarizeError(details), seq: 0 }
+      if (Number.isFinite(at)) session.activityAt = Math.max(session.activityAt, at)
       if (notify) {
         session.error.seq = ++errors.count
         errors.message = session.error.reason
+        session.signals.errors = { count: session.signals.errors.count + 1, message: session.error.reason }
       }
     } else if (event.type === 'task_complete' || event.type === 'turn_aborted') {
       if (Number.isFinite(at)) session.activityAt = Math.max(session.activityAt, at)
@@ -164,6 +173,8 @@ function createActivity(enabled, sessionsRoot) {
         turnEnd.errorSeq = kind === 'error' ? session.error.seq : 0
         turnEnd.reason = kind === 'error' ? session.error.reason
           : kind === 'interrupted' && event.reason === 'interrupted' ? '本轮被中断' : ''
+        session.signals.turnEnd = { ...turnEnd, seq: session.signals.turnEnd.seq + 1,
+          errorSeq: kind === 'error' ? session.signals.errors.count : 0 }
       }
     }
   }
@@ -179,6 +190,7 @@ function createActivity(enabled, sessionsRoot) {
         offset: 0, updated: 0, turn: null, mode: null, talkUntil: 0, error: null,
         activityAt: 0, totalTokens: null, turnStartTokens: null, turnTokens: null,
         inputCalls: new Map(), awaitingAnswers: 0,
+        signals: { tools: { ok: 0, fail: 0 }, errors: { count: 0 }, userInput: { seq: 0, scene: null }, turnStartSeq: 0, turnEnd: { seq: 0, kind: 'completed' } },
       }
       if (size === session.offset) return
       const start = Math.max(session.offset, size - tailLimit)
@@ -255,6 +267,12 @@ function createActivity(enabled, sessionsRoot) {
       }
       const selected = active || latest
       return {
+        conversations: [...files].filter(([, s]) => !s.subagent).map(([filename, s]) => ({
+          id: path.basename(filename), lastActivityAt: s.activityAt, ...s.signals,
+          work: { active: Boolean(s.turn && now - s.activityAt <= activeTimeout),
+            mode: s.turn && now - s.activityAt <= activeTimeout ? s.talkUntil > now ? 'outputting' : s.mode || 'thinking' : 'idle' },
+          closureCompanion: { tokenUsage: s.totalTokens == null ? null : { total: s.totalTokens, turn: s.turnTokens } },
+        })),
         closureCompanion: {
           following: Boolean(watcher), completed: now - turnEnd.at < 10000 && turnEnd.kind === 'completed',
           quota: now - rateLimits.at < quotaTimeout ? rateLimits.windows.filter((entry) => entry.resetsAt > now) : [],

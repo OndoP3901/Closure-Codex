@@ -1,0 +1,97 @@
+/* Values mirror the current Codex decoration, with DSH-owned layout seats. */
+html[data-closure-dsh-theme="on"] {
+  --closure-top: #3a3fd8;
+  --closure-mid: #2b30b8;
+  --closure-bottom: #1d2180;
+  --closure-line: #ff3ea5;
+  --closure-grid: rgb(238 240 255 / 5%);
+  --closure-surface: #0a0b16;
+  --closure-ink: #eef0ff;
+  --closure-edge: rgb(166 120 240 / 17%);
+  --closure-menu-grid:
+    repeating-linear-gradient(90deg, var(--closure-grid) 0 1px, transparent 1px 8px),
+    repeating-linear-gradient(0deg, var(--closure-grid) 0 1px, transparent 1px 8px);
+  --closure-menu-paint: var(--closure-menu-grid),
+    linear-gradient(180deg, var(--closure-top), var(--closure-mid) 45%, transparent),
+    linear-gradient(90deg, var(--closure-top), var(--closure-mid) 45%, transparent);
+  --closure-ambient:
+    radial-gradient(ellipse at 82% 4%, rgb(126 14 228 / 7%), transparent 60%),
+    radial-gradient(ellipse at 50% 115%, rgb(66 58 216 / 13%), transparent 70%);
+  color-scheme: dark;
+}
+html[data-closure-dsh-theme="on"] body {
+  --dsw-font-family: "Cascadia Mono", "DengXian", "等线", "Microsoft YaHei UI", "Microsoft YaHei", ui-monospace, monospace !important;
+  --ds-font-family-code: "Cascadia Mono", Consolas, "DengXian", "等线", "Microsoft YaHei UI", "Microsoft YaHei", ui-monospace, monospace !important;
+  --dsh-font-family-terminal: var(--ds-font-family-code) !important;
+  --dsw-font-family-brand: var(--dsw-font-family) !important;
+  --dsw-focus-ring-color: var(--closure-line);
+  background-color: var(--closure-surface);
+  color: var(--closure-ink);
+}
+/* One viewport-aligned paint beneath the entire L-shaped menu; neither surface
+   restarts the gradient or grid at the corner. Native layout keeps its sizes. */
+html[data-closure-dsh-theme="on"] .closure-dsh-frame {
+  background-color: var(--closure-bottom) !important;
+  background-image: var(--closure-menu-paint) !important;
+  background-size: auto, auto, 100% var(--dsh-windows-titlebar-height, 40px), var(--closure-dsh-menu-width, 264px) 100% !important;
+  background-position: 0 0 !important;
+  background-repeat: repeat, repeat, no-repeat, no-repeat !important;
+  background-attachment: fixed !important;
+}
+html[data-closure-dsh-theme="on"][data-windows-titlebar] .closure-dsh-frame::before {
+  background-color: transparent !important;
+  background-image: linear-gradient(90deg, transparent var(--closure-dsh-menu-width, 0px), var(--closure-line) 0) !important;
+  background-size: 100% 1px !important;
+  background-position: left bottom !important;
+  background-repeat: no-repeat !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+html[data-closure-dsh-theme="on"] .closure-dsh-caption-probe {
+  background-color: transparent !important;
+}
+html[data-closure-dsh-theme="on"] .closure-dsh-sidebar-column {
+  background: transparent !important;
+  border-right-color: transparent;
+  box-shadow: inset -1px 0 0 var(--closure-line);
+}
+/* Keep the entire column on the same paint: navigation, workspace header,
+   session rows, scroll fade and footer must not mask the shared grid. */
+html[data-closure-dsh-theme="on"] .closure-dsh-sidebar {
+  background: transparent !important;
+  color: var(--closure-ink);
+  --dsw-specific-sidebar-fill: transparent;
+  --dsw-alias-label-secondary: rgb(238 240 255 / 76%);
+  --dsw-alias-label-tertiary: rgb(238 240 255 / 65%);
+  --dsw-alias-label-caption: rgb(238 240 255 / 65%);
+  --dsw-alias-button-elevated-fill: rgb(238 240 255 / 8%);
+  --dsw-alias-button-floating-fill: rgb(238 240 255 / 8%);
+  --dsw-alias-button-floating-hover: rgb(238 240 255 / 15%);
+  --dsw-alias-interactive-bg-hover: rgb(238 240 255 / 12%);
+  --dsw-alias-interactive-bg-active: rgb(238 240 255 / 18%);
+  --dsw-alias-interactive-bg-hover-solid: rgb(238 240 255 / 15%);
+  --dsw-specific-sidebar-nav-item-active: rgb(238 240 255 / 14%);
+}
+html[data-closure-dsh-theme="on"] :is(.closure-dsh-center, .closure-dsh-rightbar),
+html[data-closure-dsh-theme="on"] .closure-dsh-center [data-slot="main.conversation"] > [data-phase] {
+  background-color: var(--closure-surface) !important;
+  background-image: var(--closure-ambient) !important;
+  background-repeat: no-repeat;
+}
+/* A single page compositor layer, identical in strength and pitch to Codex. */
+html[data-closure-dsh-theme="on"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645;
+  pointer-events: none;
+  user-select: none;
+  background-image:
+    repeating-linear-gradient(180deg, rgb(255 255 255 / 1.12%) 0 1px, rgb(0 0 0 / 0.88%) 1px 3px),
+    radial-gradient(ellipse 130% 110% at 50% 0%, transparent 62%, rgb(8 8 16 / 26%) 100%);
+}
+@media (forced-colors: active) {
+  html[data-closure-dsh-theme="on"]::before { content: none; }
+  html[data-closure-dsh-theme="on"] :is(.closure-dsh-frame, .closure-dsh-sidebar, .closure-dsh-center, .closure-dsh-rightbar),
+  html[data-closure-dsh-theme="on"][data-windows-titlebar] .closure-dsh-frame::before { background-image: none !important; }
+  html[data-closure-dsh-theme="on"] body { forced-color-adjust: auto; }
+}

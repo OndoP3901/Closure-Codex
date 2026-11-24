@@ -13,26 +13,41 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $PackagePath).Path)
 $prefix = 'Closure-Codex-v' + $version + '-win-x64/'
 $runtimePrefix = $prefix + 'work/companion-runtime/electron/'
-$shippedTools = @('tools/Enable-Codex-Theme.cmd','tools/Restore-Codex-Appearance.cmd')
+$shippedTools = @('tools/Enable-Codex-Theme.cmd','tools/Restore-Codex-Appearance.cmd','tools/Start-WorkBuddy-Companion.ps1')
+$shippedDocs = @('docs/USAGE.md','docs/COMPANION-INTEGRATIONS.md','docs/DSH-THEME.md','docs/WORKBUDDY-THEME.md')
+$bridge = Get-Content -LiteralPath (Join-Path $projectRoot 'plugins/dsh-closure-companion-bridge/package.json') -Raw | ConvertFrom-Json
+$dshTheme = Get-Content -LiteralPath (Join-Path $projectRoot 'plugins/dsh-closure-codex-theme/package.json') -Raw | ConvertFrom-Json
+$generatedSources = @{}
+foreach ($file in "$($bridge.name)-$($bridge.version).tgz",'README.md','SHA256SUMS.txt') {
+    $generatedSources["plugins/dsh-companion/$file"] = Join-Path $projectRoot "dist/companion-bridge/v$($bridge.version)/$file"
+}
+$generatedSources["plugins/dsh-theme/$($dshTheme.name)-$($dshTheme.version).tgz"] = Join-Path $projectRoot "dist/dsh-theme/v$($dshTheme.version)/$($dshTheme.name)-$($dshTheme.version).tgz"
+$generatedSources['plugins/dsh-theme/README.md'] = Join-Path $projectRoot 'plugins/dsh-closure-codex-theme/README.md'
 $required = @('Install.cmd','Uninstall.cmd','Enable-Codex-Theme.vbs','Restore-Codex-Appearance.vbs',
+    'Enable-WorkBuddy-Theme.vbs','Restore-WorkBuddy-Appearance.vbs','Start-WorkBuddy-Companion.vbs','tools/Start-WorkBuddy-Companion.ps1',
     'tools/Enable-Codex-Theme.cmd','tools/Restore-Codex-Appearance.cmd',
     'README.md','CHANGELOG.md','docs/USAGE.md','Setup.ps1','outputs/Start-Closure.cmd','outputs/closure-companion/main.cjs','outputs/closure-companion/runtime-settings.cjs',
+    'outputs/closure-companion/integrations.cjs','outputs/closure-companion/linked-state.cjs','outputs/closure-companion/dsh.cjs','outputs/closure-companion/workbuddy.cjs',
+    'outputs/closure-companion/workbuddy-renderer.js','outputs/closure-companion/workbuddy-launch.cjs','outputs/closure-companion/local-cdp.cjs',
+    'plugins/workbuddy-closure-codex-theme/Theme.ps1','plugins/workbuddy-closure-codex-theme/Enable-Theme.vbs','plugins/workbuddy-closure-codex-theme/Restore-Theme.vbs',
+    'plugins/workbuddy-closure-codex-theme/lib/launcher.cjs','plugins/workbuddy-closure-codex-theme/lib/attach.cjs','plugins/workbuddy-closure-codex-theme/lib/renderer.js',
     'outputs/closure-decoration/Theme.ps1','outputs/closure-decoration/theme-launcher.cjs','outputs/closure-decoration/attach.cjs',
     'outputs/closure-decoration/official-runtime.cjs','outputs/closure-decoration/palette.cjs','outputs/closure-decoration/renderer-payload.cjs','outputs/closure-decoration/README.md','outputs/closure-theme/closure-dark.txt')
 $obsolete = '(?i)(?:/closure-crt/|/tests/|/production/|/companion-profile/|closure-light\.txt$|Copy-(?:Light|Dark)-Theme\.cmd$|launch-with-activity\.cmd$|(?:Start|Stop)-Decorated\.cmd$|Restart-Current\.ps1$|/closure-decoration/(?:launch\.cjs|Launch\.ps1|[Pp]review[^/]*))'
 $verified = 0
 $testedPayloadFiles = 0
 try {
-    foreach ($file in $required) { if (!$archive.GetEntry($prefix + $file)) { throw ('Required release file missing: ' + $file) } }
+    foreach ($file in @($required) + @($shippedDocs) + @($generatedSources.Keys)) { if (!$archive.GetEntry($prefix + $file)) { throw ('Required release file missing: ' + $file) } }
     foreach ($entry in $archive.Entries) {
         if (!$entry.FullName.StartsWith($prefix) -or $entry.FullName.Contains('..') -or $entry.FullName -match $obsolete) { throw ('Unexpected package path: ' + $entry.FullName) }
         if ($entry.FullName.EndsWith('/')) { continue }
         $relative = $entry.FullName.Substring($prefix.Length)
-        if ($relative.StartsWith('docs/') -and $relative -ne 'docs/USAGE.md') { throw ('Unexpected documentation in package: ' + $relative) }
+        if ($relative.StartsWith('docs/') -and $relative -notin $shippedDocs) { throw ('Unexpected documentation in package: ' + $relative) }
         if (($relative.StartsWith('tools/') -and $relative -notin $shippedTools) -or $relative -in @('Enable-Codex-Theme.cmd','Restore-Codex-Appearance.cmd')) {
             throw ('Unexpected debug entry location: ' + $relative)
         }
         $source = Join-Path $projectRoot $relative
+        if ($generatedSources.ContainsKey($relative)) { $source = $generatedSources[$relative] }
         if (!(Test-Path -LiteralPath $source -PathType Leaf)) { throw ('Package source missing: ' + $relative) }
         $sha = [Security.Cryptography.SHA256]::Create()
         $stream = $entry.Open()
