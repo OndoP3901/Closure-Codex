@@ -4,13 +4,14 @@ const fs = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
+const { version } = require('../outputs/closure-companion/package.json')
 const { createQuota } = require('../outputs/closure-companion/quota.cjs')
 const { discover, creditsFromUsage } = require('../outputs/closure-companion/workbuddy.cjs')
 const { connect, evaluate } = require('../outputs/closure-companion/local-cdp.cjs')
 
 async function main() {
   const root = path.resolve(__dirname, '..')
-  const output = path.join(root, 'work/release-0.7.0/live-integrations.json')
+  const output = path.join(root, 'work', `release-${version}`, 'live-integrations.json')
   const quota = createQuota({ enabled: true, home: process.env.CODEX_HOME || path.join(os.homedir(), '.codex') })
   const checks = {}
   try {

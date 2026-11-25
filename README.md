@@ -1,61 +1,43 @@
 # 可露希尔的 Codex
 
-让《明日方舟》的可露希尔陪你使用 **Codex、DSH 和 WorkBuddy**：可互动的桌宠、57 条游戏原声，以及紫蓝网格、洋红细线与 CRT 扫描线组成的深色主题。
+《明日方舟》可露希尔桌宠会说游戏里的台词，也能在任务完成时提醒你。Codex、DSH 和 WorkBuddy 还可以换上「卫戍协议」风格的深色主题。桌宠和主题可分开使用。
 
-**桌宠和主题可以分别使用。** 桌宠既可独立陪伴，也可跟随三款软件的任务播放动作和台词。当前版本 **v0.7.0**，适用于 Windows 64 位（x64）。
+**v0.8.0 · Windows 64 位（x64）**　[下载发行包](https://github.com/OndoP3901/Closure-Codex/releases) · [更新日志](CHANGELOG.md) · [旧版使用方法](docs/USAGE.md#旧版怎么用)
 
-[下载发行包](https://github.com/OndoP3901/Closure-Codex/releases) · [更新日志](CHANGELOG.md) · [详细使用指南](docs/USAGE.md) · [三软件联动说明](docs/COMPANION-INTEGRATIONS.md)
+## 下载后怎么用
 
-## 下载与安装
+在发布页选择版本，下载名称形如 `Closure-Codex-v0.8.0-win-x64.zip` 的完整包。把整个压缩包解压到准备长期保留的文件夹。
 
-1. 在发布页下载 **`Closure-Codex-v0.7.0-win-x64.zip`**。
-2. 完整解压到准备长期保留的文件夹，不要在压缩包内直接运行。
-3. 双击 **`Install.cmd`**，启动桌宠。首次安装默认开启开机自启、关闭三款软件的联动。
+- **想用桌宠**，双击解压目录里的 `Install.cmd`。可露希尔会出现在桌面上，默认随 Windows 登录启动。
+- **想用主题**，在下表找到你使用的软件。
 
-总安装包包含运行时、三款软件的主题和 DSH 联动插件，无需另装 Node.js。主题可直接从对应入口启用，无需先安装桌宠；DSH 插件需要在 DSH 中安装。
-
-## 启用主题
-
-| 软件 | 启用 | 恢复原外观 |
+| 软件 | 怎么开启 | 怎么恢复原外观 |
 | --- | --- | --- |
-| Codex | `Enable-Codex-Theme.vbs` | `Restore-Codex-Appearance.vbs` |
-| DSH | 安装 `plugins/dsh-theme` 内的 `.tgz` 主题插件并启用 | 在 DSH 插件管理中停用主题插件 |
-| WorkBuddy | `Enable-WorkBuddy-Theme.vbs` | `Restore-WorkBuddy-Appearance.vbs` |
+| Codex（微软商店版） | 首次打开 Codex 并保存工作，再双击 `Enable-Codex-Theme.vbs`。窗口可能重启一次。以后用桌面或开始菜单里的「Codex - 可露希尔深色主题」启动。 | 保存工作，双击 `Restore-Codex-Appearance.vbs`。 |
+| DSH | 安装 `plugins/dsh-theme` 文件夹里的 `.tgz` 主题插件，再打开 DSH。[安装步骤](docs/DSH-THEME.md#安装主题) | 在 DSH 的插件管理中停用 `dsh-closure-codex-theme`。 |
+| WorkBuddy | 首次保存工作，从任务栏右下角的托盘退出 WorkBuddy，再双击 `Enable-WorkBuddy-Theme.vbs`。以后也用这个文件启动。 | 双击 `Restore-WorkBuddy-Appearance.vbs`，窗口和草稿会保留。 |
 
-**Codex：** 需要 Microsoft Store 版。首次先正常打开 Codex，再运行启用入口；普通窗口会重启一次，保留账号、聊天记录和配置。以后使用自动创建的「Codex - 可露希尔深色主题」快捷方式，即使 Codex 已完全退出也能启动。
+## 桌宠怎么操作
 
-**DSH：** 主题是原生插件，不依赖上游主题。覆盖顶栏、窗口按钮区、完整工作区与会话侧栏、设置页和插件页；停用后恢复原有外观。安装方法见 [DSH 主题说明](docs/DSH-THEME.md)。
-
-**WorkBuddy：** 首次保存工作并从托盘退出，再运行启用入口；以后也使用此入口启动。主题通过启动连接加载，不修改安装包。独立设置窗口使用纯深色顶部，不显示装饰条；恢复时保留当前窗口和草稿。详见 [WorkBuddy 主题说明](docs/WORKBUDDY-THEME.md)。
-
-## 使用桌宠
-
-**左键点击**角色可互动，**按住拖动**移动位置，**中键点击**查看已连接工具的账户余额，**右键点击**打开设置。余额不自动弹出。
-
-| 常用设置 | 作用 |
+| 鼠标操作 | 效果 |
 | --- | --- |
-| Codex 联动 | 跟随本机 Codex 任务，并查询账户余额或额度。 |
-| DSH 联动 | 安装 `plugins/dsh-companion` 内的 `.tgz` 联动插件后，读取任务和官方钱包。 |
-| WorkBuddy 联动 | 使用主题或联动入口启动，读取任务和软件内账号积分。 |
-| 在桌面和其他软件中显示 | 默认开启；关闭后只在已勾选联动软件的主窗口前台显示。 |
-| 开机自启 | 控制随 Windows 登录启动，独立于联动与显示范围。 |
-| 大小、透明度、镜像、帧率 | 调整角色外观与流畅度，帧率范围 30–60 FPS。 |
-| 对话字号、气泡大小、配音和语音队列 | 使用默认台词或个人队列，分别调整显示与声音。 |
+| 左键点一下 | 听一句可露希尔的游戏台词。 |
+| 按住左键拖动 | 移动桌宠，拖到屏幕边缘附近会自动贴边。 |
+| 按一下鼠标滚轮 | 查看已连接软件的余额、额度或积分。 |
+| 右键点一下 | 换配音、调大小、关闭开机自启，或在菜单底部选择「退出桌宠」。 |
 
-三款软件的联动开关可以同时启用，共用原 Codex 联动语音队列。提示、动画和台词以所有已连接工具中最近有真实活动的对话为准，同一工具内的多个对话也独立比较。任务开始、输出、工具执行、提问、回答和结束都算活动；余额刷新与心跳不改变优先来源。切换不补播旧提示，语音轮换进度保留。
+**想让桌宠跟随任务**，右键勾选对应软件的「联动」，首次安装时三项都关闭。Codex 可以直接勾选。DSH 还要安装 `plugins/dsh-companion` 里的插件。WorkBuddy 用主题入口启动即可，也可以用 `Start-WorkBuddy-Companion.vbs` 只开联动。多个对话同时工作时，桌宠跟随最近有活动的那一段。[联动步骤与余额说明](docs/COMPANION-INTEGRATIONS.md)
 
-中键查看时会分别标明每款已连接工具：DSH 显示官方充值钱包与赠送钱包，WorkBuddy 显示软件账号剩余积分，Codex 沿用已有账户查询。未连接项不显示。DSH、WorkBuddy 的第三方模型和中转站余额查询暂未实现。
+桌宠有 57 条游戏原声，可以为任务开始、完成等场景挑选不同台词。[自定义台词与气泡](docs/USAGE.md#桌宠设置)
 
-设置会自动保存到 `work/companion-profile`。退出后运行 `outputs/Start-Closure.cmd` 重新打开。更多说明见[使用指南](docs/USAGE.md)。
+## 升级与卸载
 
-## 升级、卸载与排错
-
-升级时复制旧版 `work/companion-profile` 到新版相同位置，再运行 `Install.cmd`；联动开关、个人队列、位置和显示范围会保留。旧自动余额提醒会迁移为中键手动查看。卸载前恢复各软件主题，再运行 `Uninstall.cmd`。如果没有余额显示，确认对应联动已勾选并使用支持联动的入口启动软件。
+- **升级**时先退出旧桌宠，将新版解压到新文件夹。把旧目录的 `work/companion-profile` 复制到新版相同位置，再双击新版 `Install.cmd`。位置、个人台词和开机自启选择都会保留。使用主题时，从新版目录启用对应主题。
+- **卸载**时先按上表恢复用过的主题，在 DSH 中移除装过的主题或桌宠联动插件，再双击 `Uninstall.cmd`。
+- **重新打开桌宠**时，双击 `outputs/Start-Closure.cmd`。[常见问题](docs/USAGE.md#常见问题)
 
 ## 来源与许可
 
-本项目为非官方移植。感谢 [dsh-closure-skin](https://github.com/fengshiyangrouguan/dsh-closure-skin) 和 [dsh-closure-pet](https://github.com/fengshiyangrouguan/dsh-closure-pet) 提供主题方案、模型、动作与音效。
+本项目是非官方移植。主题灵感来自 DSH 的可露希尔皮肤，桌宠沿用上游的角色模型、动作和音效。[上游主题](https://github.com/fengshiyangrouguan/dsh-closure-skin) · [上游桌宠](https://github.com/fengshiyangrouguan/dsh-closure-pet)
 
-游戏素材权利归各自权利人。[主题许可](outputs/closure-theme/LICENSE) · [桌宠代码许可](outputs/closure-companion/upstream/LICENSE) · [素材与第三方声明](outputs/closure-companion/upstream/NOTICE.md) · [字体许可](outputs/closure-companion/upstream/assets/fonts/OFL.txt)
-
-源码构建与后台验证方法见[开发说明](docs/USAGE.md#从源码构建与验证)。当前适配 Windows x64 的 Codex、DSH 0.2.2-rc.5 与 WorkBuddy 5.11.3。
+《明日方舟》游戏素材归各自权利人，上游限定为个人本机使用。代码、素材和字体的授权说明分别随包提供。[主题许可](outputs/closure-theme/LICENSE) · [桌宠代码许可](outputs/closure-companion/upstream/LICENSE) · [素材声明](outputs/closure-companion/upstream/NOTICE.md) · [字体许可](outputs/closure-companion/upstream/assets/fonts/OFL.txt)

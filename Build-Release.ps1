@@ -1,5 +1,5 @@
 param(
-    [string] $Version = '0.7.0',
+    [string] $Version = '0.8.0',
     [string] $ElectronZip = (Join-Path $PSScriptRoot 'work/companion-runtime/electron-mirror.zip'),
     [string] $ElectronDirectory = (Join-Path $PSScriptRoot 'work/companion-runtime/electron'),
     [string] $Destination = (Join-Path $PSScriptRoot 'dist')

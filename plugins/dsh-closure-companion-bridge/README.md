@@ -1,11 +1,27 @@
-# 可露希尔桌宠 · DSH 联动桥
+# DSH 桌宠联动插件
 
-安装到 DSH 桌面配置后，在独立桌宠的右键菜单中勾选「DSH 联动」。无需开启 DSH 主题，也不会在 DSH 窗口内生成第二只桌宠。
+让桌面上的可露希尔跟随 DSH 的任务播放动作和台词，并在你按下鼠标滚轮时显示 DSH 官方钱包余额。可以和任意 DSH 主题搭配。适配 DSH `0.2.2-rc.5`，插件版本 `0.1.2`。
 
-插件订阅 DSH 原生任务、工具、提问事件，通过本机状态文件传给桌宠；对话和语音共用 Codex 的联动队列。官方余额调用 DSH 自己的 `deepseekAccount.getBalance`，分别显示充值钱包与赠送钱包；第三方模型余额暂不查询。
+## 安装并连接桌宠
 
-状态目录：`%LOCALAPPDATA%\ClosureCompanion\bridges`。只有桌宠开启联动并保持心跳时才查询余额，每分钟刷新，轮次结束后补刷。关闭联动或退出桌宠后停止查询。文件只包含归一化的事件计数、任务状态、Token 用量和余额，不包含对话正文或登录凭据。
+1. 若还没有桌宠，解压可露希尔完整包，双击 `Install.cmd`。联动插件在 `plugins/dsh-companion` 文件夹，文件名是 `dsh-closure-companion-bridge-0.1.2.tgz`。
+2. 打开 DSH 自带的终端，保存工作并从托盘退出 DSH。在终端执行下面的命令，把引号内的示例路径换成实际文件路径。
 
-适配版本：DSH 0.2.2-rc.5。使用 DSH 的插件管理界面安装本目录打包生成的 `.tgz`，或执行 `dsh plugin --profile desktop add <包路径>`。如当前 DSH 尚未加载新插件，退出并重新打开 DSH。
+```powershell
+dsh plugin --profile desktop add "C:\Downloads\dsh-closure-companion-bridge-0.1.2.tgz"
+```
 
-开发：在项目根目录执行 `node plugins/dsh-closure-companion-bridge/tools/build.mjs`，再执行 `npm pack ./plugins/dsh-closure-companion-bridge`。
+3. 重新打开 DSH，右键点击桌宠，勾选「DSH 联动」。在 DSH 开始一段对话后，桌宠就会跟随任务。把鼠标移到桌宠上，按一下滚轮即可分别查看充值余额和赠送余额。
+
+## 关闭联动
+
+在桌宠菜单中取消「DSH 联动」即可停止查询。想彻底移除插件，可在 DSH 的插件管理中卸载 `dsh-closure-companion-bridge`。
+
+## 开发说明
+
+桌宠通过 `%LOCALAPPDATA%\ClosureCompanion\bridges` 接收任务状态、用量和余额。这些文件不保存聊天正文或登录凭据。在本插件目录运行以下命令可重新打包。
+
+```powershell
+node tools/build.mjs
+npm pack
+```

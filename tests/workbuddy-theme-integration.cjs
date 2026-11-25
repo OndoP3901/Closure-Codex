@@ -5,6 +5,7 @@ const assert=require('node:assert/strict')
 const fs=require('node:fs/promises')
 const path=require('node:path')
 const {spawn}=require('node:child_process')
+const {checkFolder,checkCodePanel}=require('./theme-detail-checks.cjs')
 const root=path.resolve(__dirname,'..')
 const packageRoot=process.env.CLOSURE_TEST_PACKAGE_ROOT||root
 const output=process.env.CLOSURE_TEST_OUTPUT||path.join(root,'work/workbuddy-theme/verification')
@@ -70,7 +71,7 @@ app.whenReady().then(async()=>{
       return {width:innerWidth,height:innerHeight,sideWidth:b.width,sideBottom:b.bottom,font:getComputedStyle(document.body).fontFamily,
         mode:document.documentElement.getAttribute('data-theme'),source:document.body.getAttribute('data-theme-source'),
         listBackground:getComputedStyle(list).backgroundColor,listImage:getComputedStyle(list).backgroundImage,
-        grid:getComputedStyle(side).backgroundImage.includes('repeating-linear-gradient'),topGrid:getComputedStyle(menu).backgroundImage.includes('repeating-linear-gradient'),
+        solidSidebar:getComputedStyle(side).backgroundImage==='none' && getComputedStyle(side).backgroundColor==='rgb(16, 18, 34)',topGrid:getComputedStyle(menu).backgroundImage.includes('repeating-linear-gradient'),
         crt:getComputedStyle(document.documentElement,'::before').pointerEvents,inputHit:input.contains(document.elementFromPoint(i.left+10,i.top+12)),
         ink:getComputedStyle(input).color,composer:getComputedStyle(document.querySelector('.cr-input-container')).backgroundColor,
         geometryUnchanged:JSON.stringify(native)===JSON.stringify(plain),overflow:document.documentElement.scrollWidth>innerWidth,
@@ -78,24 +79,80 @@ app.whenReady().then(async()=>{
     })()`)
     assert.equal(value.mode,'dark');assert.equal(value.source,'dark');assert.match(value.font,/Cascadia Mono/)
     assert.equal(value.listBackground,'rgba(0, 0, 0, 0)');assert.equal(value.listImage,'none')
-    for(const key of ['grid','topGrid','inputHit','geometryUnchanged'])assert.equal(value[key],true,`${width}: ${key}`)
+    for(const key of ['solidSidebar','topGrid','inputHit','geometryUnchanged'])assert.equal(value[key],true,`${width}: ${key}`)
     assert.equal(value.crt,'none');assert.equal(value.overflow,false)
     assert.ok(value.text.includes('主题工作区')&&value.text.includes('主题适配验收'))
     const shot=await win.webContents.capturePage(),bitmap=shot.toBitmap(),size=shot.getSize()
     const pixel=(x,y)=>{const offset=(Math.floor(y*size.height/value.height)*size.width+Math.floor(x*size.width/value.width))*4;return[bitmap[offset+2],bitmap[offset+1],bitmap[offset]]}
-    value.pixels={cornerTop:pixel(7,27),cornerBelow:pixel(7,33),sidebarMiddle:pixel(7,400),sidebarBottom:pixel(7,value.height-20),caption:pixel(value.width-7,15)}
-    for(const [name,rgb]of Object.entries(value.pixels))assert.ok(rgb[2]>80&&rgb[2]>rgb[0]*1.6&&rgb[2]>rgb[1]*1.6,`${width}: ${name} must expose blue paint, got ${rgb}`)
-    assert.ok(Math.max(...value.pixels.cornerTop.map((v,i)=>Math.abs(v-value.pixels.cornerBelow[i])))<25)
+    value.pixels={cornerTop:pixel(7,27),divider:pixel(7,29),cornerBelow:pixel(7,33),sidebarMiddle:pixel(7,400),sidebarBottom:pixel(7,value.height-20),caption:pixel(value.width-7,15)}
+    for(const name of ['cornerTop','caption']){
+      const rgb=value.pixels[name]
+      assert.ok(rgb[2]>80 && rgb[2]>rgb[0]*1.6,`${width}: ${name} must show the blue titlebar, got ${rgb}`)
+    }
+    for(const name of ['cornerBelow','sidebarMiddle','sidebarBottom']){
+      const rgb=value.pixels[name]
+      assert.ok(rgb[2]<55 && rgb[0]<35 && rgb[1]<35,`${width}: ${name} must show the dark sidebar, got ${rgb}`)
+    }
+    assert.ok(value.pixels.divider[0]>150 && value.pixels.divider[0]>value.pixels.divider[1]*2,`Missing titlebar line at left: ${value.pixels.divider}`)
     await fs.writeFile(path.join(output,`desktop-${width}x${height}.png`),shot.toPNG())
     measurements.push(value)
   }
   win.setSize(1400,900);await delay(300)
+  const workspace='.flat-subfolder-row[data-flat-row-id^="grouped-sub-workdir:"]'
+  const workspaceHeader=workspace+' .collapsible-section-header'
+  for(const open of [true,false]){
+    await waitFor(`!!document.querySelector('${workspace} .collapsible-section-motion--expanded') === ${open}`)
+    await checkFolder(win,workspaceHeader+' .collapsible-section-icon > svg',open)
+    await evaluate(`document.querySelector('${workspaceHeader}').click()`)
+  }
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
+  const codeSample=`<div id="code-sample" style="position:fixed;top:90px;right:60px;width:380px;z-index:10">
+    <div class="cr-code-like-box"><div class="cr-code-like-box__header"><span class="cr-code-block__language">powershell</span>
+    <button class="cr-code-block__copy-button" aria-label="复制">⧉</button></div>
+    <div class="cr-code-like-box__content"><pre class="cr-code-block__pre"><code>Get-Date</code></pre></div></div></div>`
+  await evaluate(`document.body.insertAdjacentHTML('beforeend',${JSON.stringify(codeSample)})`)
+  await checkCodePanel(win,{header:'#code-sample .cr-code-like-box__header',body:'#code-sample .cr-code-like-box',copy:'#code-sample button'})
+  await evaluate("document.querySelector('#code-sample').remove()")
+  const conversationCard='.conversation-list .cb-agent-card'
+  for (const id of ['closure-theme-test','closure-theme-switch-test']) {
+    const card=conversationCard+'[data-conversation-id="'+id+'"]'
+    await evaluate(`document.querySelector('${card}').click()`)
+    await waitFor(`document.querySelector('${card}[data-selected="true"]')`)
+    const mark=await evaluate(`(() => {
+      const row=document.querySelector('${card}'),paint=getComputedStyle(row)
+      const others=[...document.querySelectorAll('${conversationCard}[data-conversation-id]')].filter(item=>item.dataset.conversationId!==row.dataset.conversationId)
+      return {size:paint.backgroundSize,image:paint.backgroundImage,
+        othersClear:others.length>0 && others.every(item=>getComputedStyle(item).backgroundImage==='none')}
+    })()`)
+    assert.equal(mark.size,'2px 16px')
+    assert.match(mark.image,/rgb\(255, 62, 165\)/)
+    assert.equal(mark.othersClear,true,'Only the current conversation should show the marker')
+    // The selected row can move while the workspace group animates open.
+    let matchingFrames=0
+    let sample
+    for(let frame=0;frame<45 && matchingFrames<2;frame++){
+      const point=await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>{
+        const box=document.querySelector('${card}').getBoundingClientRect()
+        resolve({x:Math.floor(box.left+5),y:Math.floor(box.top+box.height/2)})
+      }))`)
+      const chip=await win.webContents.capturePage({...point,width:1,height:1})
+      const [blue,green,red]=chip.toBitmap()
+      sample={...point,red,green,blue}
+      matchingFrames=red>180 && green<95 && blue>115 && blue<red ? matchingFrames+1 : 0
+    }
+    assert.equal(matchingFrames,2,`Selected card ${id} must paint its magenta marker: ${JSON.stringify(sample)}`)
+  }
   await win.reload()
   await waitFor(`document.querySelector('[contenteditable=true]') && document.body.innerText.includes('主题工作区') && document.documentElement.getAttribute('data-closure-workbuddy-theme')==='on'`)
   const reloaded=await evaluate(`document.querySelectorAll('style[data-plugin=workbuddy-closure-codex-theme]').length===1`)
   assert.equal(reloaded,true)
-  await evaluate(`document.querySelector('[contenteditable=true]').focus()`)
-  win.webContents.insertText('主题验收草稿，不发送')
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
+  const editor="document.querySelector('.cr-input-container [contenteditable=true]')"
+  const composerStyle=`getComputedStyle(${editor}.closest('.cr-input-container'))`
+  await evaluate(`${editor}.focus()`)
+  await waitFor(`document.activeElement === ${editor} && ${composerStyle}.borderTopColor === 'rgb(153, 138, 185)'`)
+  assert.ok(await evaluate(`parseFloat(${composerStyle}.borderRadius)>0`),'The focused composer keeps its rounded corners')
+  await win.webContents.insertText('主题验收草稿，不发送')
   await delay(200)
   const draft=await evaluate(`document.querySelector('[contenteditable=true]').textContent`)
   assert.ok(draft.includes('主题验收草稿'))
@@ -103,6 +160,7 @@ app.whenReady().then(async()=>{
   win.webContents.sendInputEvent({type:'mouseDown',...menuPoint,button:'left',clickCount:1})
   win.webContents.sendInputEvent({type:'mouseUp',...menuPoint,button:'left',clickCount:1})
   await waitFor(`document.querySelector('.codebuddy-menu-container .menu-item')`)
+  await waitFor(`document.activeElement !== ${editor} && ${composerStyle}.borderTopColor !== 'rgb(153, 138, 185)'`)
   await delay(250)
   const menuPaint=await evaluate(`({background:getComputedStyle(document.querySelector('.codebuddy-menu-container')).backgroundColor,color:getComputedStyle(document.querySelector('.codebuddy-menu-container')).color})`)
   await fs.writeFile(path.join(output,'menu.png'),(await win.webContents.capturePage()).toPNG())

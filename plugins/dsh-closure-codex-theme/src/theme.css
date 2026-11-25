@@ -6,8 +6,17 @@ html[data-closure-dsh-theme="on"] {
   --closure-line: #ff3ea5;
   --closure-grid: rgb(238 240 255 / 5%);
   --closure-surface: #0a0b16;
+  --closure-sidebar: #101222;
+  --closure-current: var(--closure-line);
+  --closure-composer-focus: #998ab9;
+  --closure-code-header: #282838;
+  --closure-code-body: #181924;
+  --closure-code-divider: #524b65;
+  --closure-code-label: #c5c4d6;
+  --closure-folder-closed: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Cpath fill='%23c7cad9' d='M1 3h5v1h1v1h8v9H1z'/%3E%3Cpath fill='%2361677e' d='M2 4h3v1h1v1h8v7H2z'/%3E%3C/svg%3E");
+  --closure-folder-open: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Cpath fill='%23c7cad9' d='M1 2h5v1h1v1h7v9H1z'/%3E%3Cpath fill='%2361677e' d='M2 3h3v1h1v1h7v7H2z'/%3E%3Cpath fill='%23f0eef8' d='M4 5h8v4H4z'/%3E%3Cpath fill='%23c7cad9' d='M3 7h13v2h-1v2h-1v3H1v-3h1V8h1z'/%3E%3Cpath fill='%2361677e' d='M4 8h11v1h-1v2h-1v2H2v-2h1V9h1z'/%3E%3C/svg%3E");
   --closure-ink: #eef0ff;
-  --closure-edge: rgb(166 120 240 / 17%);
+  --closure-edge: rgb(123 124 171 / 22%);
   --closure-menu-grid:
     repeating-linear-gradient(90deg, var(--closure-grid) 0 1px, transparent 1px 8px),
     repeating-linear-gradient(0deg, var(--closure-grid) 0 1px, transparent 1px 8px);
@@ -28,34 +37,27 @@ html[data-closure-dsh-theme="on"] body {
   background-color: var(--closure-surface);
   color: var(--closure-ink);
 }
-/* One viewport-aligned paint beneath the entire L-shaped menu; neither surface
-   restarts the gradient or grid at the corner. Native layout keeps its sizes. */
 html[data-closure-dsh-theme="on"] .closure-dsh-frame {
+  background: var(--closure-sidebar) !important;
+}
+/* The host's titlebar pseudo-element also sits beneath the native caption buttons. */
+html[data-closure-dsh-theme="on"][data-windows-titlebar] .closure-dsh-frame::before {
   background-color: var(--closure-bottom) !important;
   background-image: var(--closure-menu-paint) !important;
-  background-size: auto, auto, 100% var(--dsh-windows-titlebar-height, 40px), var(--closure-dsh-menu-width, 264px) 100% !important;
+  background-size: auto, auto, 100% 100%, var(--closure-dsh-menu-width, 264px) 100% !important;
   background-position: 0 0 !important;
   background-repeat: repeat, repeat, no-repeat, no-repeat !important;
-  background-attachment: fixed !important;
-}
-html[data-closure-dsh-theme="on"][data-windows-titlebar] .closure-dsh-frame::before {
-  background-color: transparent !important;
-  background-image: linear-gradient(90deg, transparent var(--closure-dsh-menu-width, 0px), var(--closure-line) 0) !important;
-  background-size: 100% 1px !important;
-  background-position: left bottom !important;
-  background-repeat: no-repeat !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  box-shadow: inset 0 -1px 0 var(--closure-line), inset 0 1px 0 rgb(255 255 255 / 5%);
 }
 html[data-closure-dsh-theme="on"] .closure-dsh-caption-probe {
   background-color: transparent !important;
 }
 html[data-closure-dsh-theme="on"] .closure-dsh-sidebar-column {
-  background: transparent !important;
+  background: var(--closure-sidebar) !important;
   border-right-color: transparent;
-  box-shadow: inset -1px 0 0 var(--closure-line);
+  box-shadow: inset -1px 0 0 var(--closure-edge);
 }
-/* Keep the entire column on the same paint: navigation, workspace header,
-   session rows, scroll fade and footer must not mask the shared grid. */
+/* Rows, their hover fills and scroll fades share the opaque sidebar underneath. */
 html[data-closure-dsh-theme="on"] .closure-dsh-sidebar {
   background: transparent !important;
   color: var(--closure-ink);
@@ -76,6 +78,45 @@ html[data-closure-dsh-theme="on"] .closure-dsh-center [data-slot="main.conversat
   background-color: var(--closure-surface) !important;
   background-image: var(--closure-ambient) !important;
   background-repeat: no-repeat;
+}
+@media screen and (forced-colors: none) {
+  html[data-closure-dsh-theme="on"] .closure-dsh-sidebar [data-row-key^="workspace:"] {
+    & > span > svg[data-icon="dsw-icon-folder-open-regular"] { --closure-folder-icon: var(--closure-folder-open); }
+    & > span > svg:is([data-icon="dsw-icon-folder-open-regular"], [data-icon="dsw-icon-folder-close-regular"]) {
+      background: var(--closure-folder-icon, var(--closure-folder-closed)) center / contain no-repeat;
+      & > use { visibility: hidden; }
+    }
+  }
+  html[data-closure-dsh-theme="on"] [data-slot="main.conversation"] .md-code-block {
+    --dsl-code-block-background: var(--closure-code-body);
+
+    & [data-code-block-banner] {
+      --dsw-alias-label-primary: var(--closure-code-label);
+      --dsw-alias-label-tertiary: var(--closure-code-label);
+      background-color: var(--closure-code-header);
+      box-shadow: inset 0 -1px var(--closure-code-divider);
+    }
+    & [data-code-block-banner] button:enabled:not([aria-pressed]):is(:hover, :focus-visible) {
+      background-color: var(--closure-code-divider);
+      color: var(--closure-ink);
+    }
+  }
+}
+@media (forced-colors: none) {
+  html[data-closure-dsh-theme="on"] .closure-dsh-sidebar [data-row-key^="session:"][aria-selected="true"] {
+    background-image: linear-gradient(var(--closure-current), var(--closure-current));
+    background-size: 2px 16px;
+    background-position: left 7px center;
+    background-repeat: no-repeat;
+  }
+  html[data-closure-dsh-theme="on"] [data-composer-card]:has([contenteditable="true"]:focus) {
+    outline: 1px solid var(--closure-composer-focus);
+    outline-offset: -1px;
+  }
+  /* The send arrow has one filled path. Stop is a rect and Retry uses an icon sprite. */
+  html[data-closure-dsh-theme="on"] [data-composer-card] button[class*="_primary"][aria-busy="false"]:enabled:has(> svg > path:only-child) {
+    color: var(--closure-sidebar);
+  }
 }
 /* A single page compositor layer, identical in strength and pitch to Codex. */
 html[data-closure-dsh-theme="on"]::before {

@@ -26,8 +26,17 @@ fs.writeFileSync(path.join(probe, 'package.json'), JSON.stringify({ name: probeI
   dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } } }))
 fs.writeFileSync(path.join(probe, 'index.js'), 'export function apply() {}\n')
 fs.writeFileSync(path.join(probe, 'cordis.patch.yml'), `- insert:\n    - id: ${probeId}\n      name: ${probeId}\n`)
-fs.writeFileSync(path.join(probe, 'client.js'), `window.__ModuleLoader__.load({id:'${probeId}',factory:()=>({inject:['theme','loader'],apply(ctx){
+fs.writeFileSync(path.join(probe, 'client.js'), `window.__ModuleLoader__.load({id:'${probeId}',factory:require=>({inject:['theme','loader'],apply(ctx){
   window.__closureDshTest={
+    mountCodeSamples(host){
+      const {createElement,Fragment}=require('react'), {CodeBlock}=require('@deepseek-ai/dsh-client-ui-primitives')
+      const root=require('react-dom/client').createRoot(host)
+      const props={lang:'powershell',code:'Get-Date',copyLabel:'Copy',copiedLabel:'Copied'}
+      require('react-dom').flushSync(()=>root.render(createElement(Fragment,null,
+        createElement(CodeBlock,props),
+        createElement(CodeBlock,{...props,toolbarLabels:{codeLabel:'Code',wrapLabel:'Wrap',unwrapLabel:'Unwrap'}}))))
+      return ()=>root.unmount()
+    },
     async enable(enabled){const entry=[...ctx.loader.entries()].find(e=>e.options.name==='dsh-closure-codex-theme');if(!entry)throw Error('missing subject entry');await entry.update({disabled:!enabled});await ctx.loader.await()},
     theme:ctx.theme
   }

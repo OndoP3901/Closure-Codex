@@ -5,6 +5,7 @@ const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const {checkFolder, checkCodePanel} = require('./theme-detail-checks.cjs')
 const root = path.resolve(__dirname, '..')
 const output = process.env.CLOSURE_DSH_TEST_OUTPUT || path.join(root, 'work/dsh-theme/verification')
 const ID = 'dsh-closure-codex-theme'
@@ -98,6 +99,7 @@ app.whenReady().then(async () => {
   }
   const measurements = []
   const collapsedMeasurements = []
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
   for (const [width, height] of [[1400, 900], [900, 650], [600, 720]]) {
     phase = `expanded ${width}x${height}`
     win.setSize(width, height)
@@ -110,6 +112,7 @@ app.whenReady().then(async () => {
     const value = await evaluate(`(() => {
       const frame = document.querySelector('.closure-dsh-frame')
       const sidebar = document.querySelector('.closure-dsh-sidebar')
+      const column = document.querySelector('.closure-dsh-sidebar-column')
       const input = document.querySelector('[contenteditable=true]')
       const m = getComputedStyle(frame, '::before'), crt = getComputedStyle(document.documentElement, '::before')
       const i = input.getBoundingClientRect(), original = frame.getBoundingClientRect()
@@ -126,10 +129,12 @@ app.whenReady().then(async () => {
       const workspaceCoverage = Object.fromEntries(Object.entries(workspaceNodes).map(([name,node]) => {
         if (!node) return [name,{present:false}]
         const layers = []
-        for (let parent=node;parent && parent!==frame;parent=parent.parentElement) {
+        for (let parent=node;parent && parent!==column;parent=parent.parentElement) {
           const paint=getComputedStyle(parent)
           const alpha=paint.backgroundColor==='transparent' ? 0 : Number(paint.backgroundColor.match(/[\\d.]+/g)?.[3] ?? 1)
-          layers.push({color:paint.backgroundColor,image:paint.backgroundImage,transparent:alpha<0.25 && paint.backgroundImage==='none'})
+          const marker = parent.matches('[data-row-key^="session:"][aria-selected="true"]') &&
+            paint.backgroundSize==='2px 16px' && paint.backgroundImage.includes('rgb(255, 62, 165)')
+          layers.push({color:paint.backgroundColor,image:paint.backgroundImage,transparent:alpha<0.25 && (paint.backgroundImage==='none' || marker)})
         }
         return [name,{present:true,rect:rect(node),transparent:layers.every(layer=>layer.transparent),layers}]
       }))
@@ -147,9 +152,9 @@ app.whenReady().then(async () => {
       style.disabled = false
       return { width:innerWidth,height:innerHeight,body:getComputedStyle(document.body).backgroundColor,
         ink:getComputedStyle(document.body).color,font:getComputedStyle(document.body).getPropertyValue('--dsw-font-family'),
-        topHeight:m.height,topGrid:getComputedStyle(frame).backgroundImage.includes('repeating-linear-gradient'),
-        sidebarGrid:getComputedStyle(sidebar).backgroundColor==='rgba(0, 0, 0, 0)' && getComputedStyle(frame).backgroundImage.includes('repeating-linear-gradient'),
-        cornerLine:m.backgroundImage.includes('rgba(0, 0, 0, 0)'),
+        topHeight:m.height,topGrid:m.backgroundImage.includes('repeating-linear-gradient'),
+        solidSidebar:getComputedStyle(column).backgroundColor==='rgb(16, 18, 34)' && getComputedStyle(column).backgroundImage==='none' && getComputedStyle(frame).backgroundImage==='none',
+        divider:m.boxShadow.includes('rgb(255, 62, 165)'),
         captionBackground:getComputedStyle(document.querySelector('.closure-dsh-caption-probe')).backgroundColor,
         footerCovered:!!document.querySelector('.closure-dsh-footer'),
         sessionActionFill:getComputedStyle(document.querySelector('[data-slot="sidebar.session.action"] button')).backgroundColor,
@@ -164,14 +169,14 @@ app.whenReady().then(async () => {
     assert.equal(value.ink, 'rgb(238, 240, 255)')
     assert.match(value.font, /Cascadia Mono/)
     assert.equal(value.topHeight, '40px')
-    for (const key of ['topGrid', 'sidebarGrid', 'cornerLine', 'footerCovered', 'scanline', 'ambientPaint', 'inputHit', 'geometryUnchanged']) assert.equal(value[key], true, `${width}: ${key}`)
+    for (const key of ['topGrid', 'solidSidebar', 'divider', 'footerCovered', 'scanline', 'ambientPaint', 'inputHit', 'geometryUnchanged']) assert.equal(value[key], true, `${width}: ${key}`)
     assert.equal(value.captionBackground,'rgba(0, 0, 0, 0)')
-    assert.match(value.sessionActionFill, /^rgba\(/, 'Sidebar actions must let the shared menu paint through')
+    assert.match(value.sessionActionFill, /^rgba\(/, 'Sidebar actions must let the solid surface show through')
     assert.equal(value.crtPointer, 'none')
     assert.equal(value.overflow, false)
     for (const [name,coverage] of Object.entries(value.workspaceCoverage)) {
       assert.equal(coverage.present,true,`${width}: real ${name} must be mounted`)
-      assert.equal(coverage.transparent,true,`${width}: ${name} must reveal the shared grid through every sidebar layer`)
+      assert.equal(coverage.transparent,true,`${width}: ${name} must reveal the solid sidebar surface`)
     }
     const filename = `desktop-${width}x${height}.png`
     const screenshot = await win.webContents.capturePage()
@@ -185,12 +190,54 @@ app.whenReady().then(async () => {
       above:pixel(27,38),below:pixel(27,42),divider:pixel(27,39),
     } : null
     if(corner){
-      assert.ok(corner.divider[0]<130, 'A magenta separator must not cut through the L-shaped corner')
-      assert.ok(Math.max(...corner.above.map((v,i)=>Math.abs(v-corner.below[i])))<20, 'The corner must sample one continuous paint')
+      assert.ok(corner.divider[0]>150 && corner.divider[0]>corner.divider[1]*2, `Titlebar line over the sidebar: ${corner.divider}`)
+      assert.ok(corner.above[2]>80 && corner.below[2]<55, 'The grid must end at the titlebar')
+    }
+    if (width === 1400) {
+      const workspace = '.closure-dsh-sidebar [data-row-key^="workspace:"]'
+      const folder = workspace + ' > span > svg[data-icon^="dsw-icon-folder-"]'
+      for (const open of [true, false]) {
+        await waitFor(`document.querySelector('${workspace}').getAttribute('aria-expanded') === '${open}'`)
+        await checkFolder(win,folder,open)
+        await evaluate(`document.querySelector('${workspace}').click()`)
+      }
+      await waitFor(`document.querySelector('[data-row-key^="session:"][aria-selected="true"]')`)
+      await evaluate(`(() => {
+        const sample = document.createElement('div')
+        sample.id = 'code-samples'
+        sample.style.cssText = 'position:fixed;top:90px;right:60px;width:380px;z-index:10'
+        document.querySelector('[data-slot="main.conversation"]').append(sample)
+        sample.unmount = window.__closureDshTest.mountCodeSamples(sample)
+      })()`)
+      for (const variant of ['first-child','last-child']) {
+        const card = '#code-samples > .md-code-block:' + variant
+        await checkCodePanel(win,{header:card+' [data-code-block-banner]',body:card,copy:card+' [data-code-block-banner] button:not([aria-pressed])'})
+      }
+      await evaluate("const sample=document.getElementById('code-samples');sample.unmount();sample.remove()")
+      const selected = await evaluate(`(() => {
+        const row = document.querySelector('[data-row-key^="session:"][aria-selected="true"]')
+        const box = row.getBoundingClientRect(), paint = getComputedStyle(row)
+        return {x:box.left + parseFloat(paint.borderLeftWidth) + 8,y:box.top + box.height/2}
+      })()`)
+      const [red, green, blue] = pixel(selected.x,selected.y)
+      assert.ok(red>180 && green<95 && blue>115 && blue<red,'Selected session must have a visible magenta marker')
+      const editor = '[data-composer-card] [contenteditable="true"]'
+      await evaluate(`document.querySelector('${editor}').focus()`)
+      await win.webContents.insertText('主题配色检查')
+      await waitFor(`document.querySelector('[data-composer-card] button[class*="_primary"]:enabled')`)
+      const editorPaint = await evaluate(`(() => {
+        const card = document.querySelector('[data-composer-card]'), button = card.querySelector('button[class*="_primary"]:enabled')
+        const focus = getComputedStyle(card).outline, ink = getComputedStyle(button).color
+        const fill = getComputedStyle(button).backgroundColor
+        document.activeElement.blur()
+        return {focus,ink,fill,blurred:getComputedStyle(card).outlineStyle}
+      })()`)
+      assert.deepEqual(editorPaint,{focus:'rgb(153, 138, 185) solid 1px',ink:'rgb(16, 18, 34)',fill:'rgb(255, 62, 165)',blurred:'none'})
+      await evaluate(`document.querySelector('${editor}').focus(); document.execCommand('selectAll'); document.execCommand('delete'); document.activeElement.blur()`)
     }
     const workspacePixels = Object.fromEntries(Object.entries(value.workspacePoints || {}).map(([name,point])=>[name,pixel(...point)]))
     for (const [name,rgb] of Object.entries(workspacePixels)) {
-      assert.ok(rgb[2]>80 && rgb[2]>rgb[0]*1.6 && rgb[2]>rgb[1]*1.6,`${width}: ${name} must show blue menu paint, got ${rgb}`)
+      assert.ok(rgb[2]<80 && rgb[0]<70 && rgb[1]<70,`${width}: ${name} must show dark sidebar paint, got ${rgb}`)
     }
     await fs.writeFile(path.join(output, filename), screenshot.toPNG())
     measurements.push({ filename, ...value, corner,workspacePixels })
@@ -201,7 +248,7 @@ app.whenReady().then(async () => {
     const collapsed = await evaluate(`(() => {
       const frame=document.querySelector('.closure-dsh-frame'),column=document.querySelector('.closure-dsh-sidebar-column')
       return {width:innerWidth,columnWidth:column.getBoundingClientRect().width,paintWidth:parseFloat(frame.style.getPropertyValue('--closure-dsh-menu-width')),
-        grid:getComputedStyle(frame).backgroundImage.includes('repeating-linear-gradient'),on:document.documentElement.getAttribute('data-closure-dsh-theme'),overflow:document.documentElement.scrollWidth>innerWidth}
+        grid:getComputedStyle(frame,'::before').backgroundImage.includes('repeating-linear-gradient'),on:document.documentElement.getAttribute('data-closure-dsh-theme'),overflow:document.documentElement.scrollWidth>innerWidth}
     })()`)
     assert.ok(collapsed.columnWidth<1,`${width}: native Windows sidebar must collapse fully`)
     assert.equal(collapsed.paintWidth,collapsed.columnWidth)
@@ -217,7 +264,7 @@ app.whenReady().then(async () => {
   // Opening the native settings modal and global plugin page must keep the
   // caption, palette and CRT continuously mounted across routing.
   await evaluate(`window.__closureFrames=[];window.__closureMeasure=true;
-    (function tick(){if(!window.__closureMeasure)return;window.__closureFrames.push({on:document.documentElement.getAttribute('data-closure-dsh-theme'),grid:getComputedStyle(document.querySelector('.closure-dsh-frame')).backgroundImage.includes('repeating-linear-gradient')});requestAnimationFrame(tick)})()`)
+    (function tick(){if(!window.__closureMeasure)return;window.__closureFrames.push({on:document.documentElement.getAttribute('data-closure-dsh-theme'),grid:getComputedStyle(document.querySelector('.closure-dsh-frame'),'::before').backgroundImage.includes('repeating-linear-gradient')});requestAnimationFrame(tick)})()`)
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: ',', modifiers: ['control', 'alt'] })
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: ',', modifiers: ['control', 'alt'] })
   await waitFor(`!!document.querySelector('[data-shortcut-modal=settings]')`)
