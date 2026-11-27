@@ -103,13 +103,28 @@ fn codex_reads_live_account_without_logging_balances() {
     let result = runtime
         .block_on(codex::account(&home))
         .expect("Codex app-server did not return account state");
+    assert!(
+        result["quota"]
+            .as_array()
+            .is_some_and(|windows| !windows.is_empty()),
+        "Codex app-server returned no active official quota windows"
+    );
     let account = codex::Codex::default().tick(&home, &result);
     assert!(account.connected);
-    assert!(result["quota"].as_array().is_some());
-    assert!(matches!(
-        result["source"].as_str(),
-        Some("official" | "thirdParty" | "unsupported")
-    ));
+    let hub = Hub::default();
+    hub.set(0, account);
+    let state = hub.snapshot(Settings {
+        codex_linked: true,
+        ..Settings::default()
+    });
+    let account = &state["closureCompanion"]["accounts"][0];
+    assert_eq!(account["host"], "codex");
+    assert!(
+        account["quota"]
+            .as_array()
+            .is_some_and(|windows| !windows.is_empty()),
+        "Official Codex quota was lost when building the frontend snapshot"
+    );
 }
 
 #[test]

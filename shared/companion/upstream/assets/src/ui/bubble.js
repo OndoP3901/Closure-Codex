@@ -33,15 +33,14 @@ export function quotaLines(state) {
   if (companion?.source === 'thirdParty') {
     const balance = companion.balance
     if (balance) lines.push([`账户余额 ${balance.remaining.toFixed(2)}`, balance.unit].filter(Boolean).join(' '))
-  } else {
-    for (const { minutes, remaining } of companion?.quota || []) {
-      const window = minutes % 1440 === 0 ? minutes / 1440 + ' 天'
-        : minutes % 60 === 0 ? minutes / 60 + ' 小时' : minutes + ' 分钟'
-      lines.push(`${window}额度还剩 ${Math.round(remaining * 10) / 10}%`)
-    }
-    if (companion?.credits) {
-      lines.push(`ChatGPT 积分${companion.credits.unlimited ? '不限量' : '还剩 ' + companion.credits.balance}`)
-    }
+  }
+  for (const { minutes, remaining } of companion?.quota || []) {
+    const window = minutes % 1440 === 0 ? minutes / 1440 + ' 天'
+      : minutes % 60 === 0 ? minutes / 60 + ' 小时' : minutes + ' 分钟'
+    lines.push(`${window}额度还剩 ${Math.round(remaining * 10) / 10}%`)
+  }
+  if (companion?.credits) {
+    lines.push(`ChatGPT 积分${companion.credits.unlimited ? '不限量' : '还剩 ' + companion.credits.balance}`)
   }
   const usage = companion?.tokenUsage
   if (usage) {

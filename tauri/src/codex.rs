@@ -438,7 +438,7 @@ pub async fn account(home: &Path) -> Option<Value> {
             .or(config["openai_base_url"].as_str())
             .map(str::to_owned)
             .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
-        if base
+        let balance_query = if base
             .as_deref()
             .and_then(|url| url::Url::parse(url).ok())
             .is_some_and(|url| {
@@ -447,8 +447,7 @@ pub async fn account(home: &Path) -> Option<Value> {
                     && url.username().is_empty()
                     && url.password().is_none()
                     && url.port().is_none()
-            })
-        {
+            }) {
             let key = provider["env_key"]
                 .as_str()
                 .and_then(|key| std::env::var(key).ok())
@@ -457,12 +456,12 @@ pub async fn account(home: &Path) -> Option<Value> {
                         .as_str()
                         .map(str::to_owned)
                 });
-            let balance = tokio::task::spawn_blocking(move || key.as_deref().and_then(third_party))
-                .await
-                .ok()
-                .flatten();
-            return Some(json!({"source":"thirdParty", "quota":[], "balance":balance}));
-        }
+            Some(tokio::task::spawn_blocking(move || {
+                key.as_deref().and_then(third_party)
+            }))
+        } else {
+            None
+        };
         let official = |value: Option<&str>, expected: &str| {
             value.is_none_or(|value| {
                 url::Url::parse(value).is_ok_and(|url| {
@@ -476,51 +475,61 @@ pub async fn account(home: &Path) -> Option<Value> {
             .as_str()
             .map(str::to_owned)
             .or_else(|| std::env::var("CHATGPT_BASE_URL").ok());
-        if name != "openai"
-            || !official(base.as_deref(), "https://api.openai.com")
-            || !official(chat.as_deref(), "https://chatgpt.com")
-        {
-            return Some(json!({"source":"unsupported", "quota":[]}));
-        }
-        let account = rpc
-            .call("account/read", json!({"refreshToken":false}))
-            .await?;
-        if account["account"]["type"] != "chatgpt" {
-            return Some(json!({"source":"unsupported", "quota":[]}));
-        }
-        let result = rpc
-            .call(
+        // ChatGPT quota belongs to the account and can be available with a custom model provider.
+        let official_account = if official(chat.as_deref(), "https://chatgpt.com") {
+            rpc.call(
                 "account/rateLimits/read",
                 json!({"excludeResetCreditDetails":true}),
             )
-            .await?;
-        let limits = result
-            .pointer("/rateLimitsByLimitId/codex")
-            .unwrap_or(&result["rateLimits"]);
-        let quantity = limits["credits"]["balance"].as_str().filter(|balance| {
-            balance.len() <= 25
-                && balance.bytes().all(|b| b.is_ascii_digit() || b == b'.')
-                && balance.parse::<f64>().is_ok_and(f64::is_finite)
-        });
-        let credits = if limits["credits"]["unlimited"] == true {
-            Some(json!({"unlimited":true}))
+            .await
+            .map(|result| parse_official_limits(&result))
         } else {
-            quantity.map(|balance| json!({"balance":balance}))
+            None
         };
-        let quota = collect_limits(
-            limits,
-            "usedPercent",
-            "windowDurationMins",
-            "resetsAt",
-            now(),
-        );
-        Some(json!({"source":"official","quota":quota,"credits":credits}))
+        if let Some(query) = balance_query {
+            let balance = query.await.ok().flatten();
+            let mut account = official_account.unwrap_or_else(|| json!({"quota":[]}));
+            account["source"] = json!("thirdParty");
+            account["balance"] = json!(balance);
+            Some(account)
+        } else {
+            official_account.or_else(|| {
+                (name != "openai"
+                    || !official(base.as_deref(), "https://api.openai.com")
+                    || !official(chat.as_deref(), "https://chatgpt.com"))
+                .then(|| json!({"source":"unsupported","quota":[]}))
+            })
+        }
     })
     .await
     .ok()
     .flatten();
     let _ = child.kill().await;
     result
+}
+
+fn parse_official_limits(result: &Value) -> Value {
+    let limits = result
+        .pointer("/rateLimitsByLimitId/codex")
+        .unwrap_or(&result["rateLimits"]);
+    let quantity = limits["credits"]["balance"].as_str().filter(|balance| {
+        balance.len() <= 25
+            && balance.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+            && balance.parse::<f64>().is_ok_and(f64::is_finite)
+    });
+    let credits = if limits["credits"]["unlimited"] == true {
+        Some(json!({"unlimited":true}))
+    } else {
+        quantity.map(|balance| json!({"balance":balance}))
+    };
+    let quota = collect_limits(
+        limits,
+        "usedPercent",
+        "windowDurationMins",
+        "resetsAt",
+        now(),
+    );
+    json!({"source":"official","quota":quota,"credits":credits})
 }
 
 fn third_party(key: &str) -> Option<Value> {

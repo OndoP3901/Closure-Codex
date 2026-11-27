@@ -43,6 +43,37 @@ export async function smoke(pet, parameters, untouchedAtLoad) {
   check(duration > 500 && audio.getVoiceState()?.volume === 0, 'Native voice duration or mute setting is incorrect')
   audio.stopPreview()
   check(!audio.getVoiceState(), 'Native voice preview did not stop')
+
+  pet.hideBubble()
+  pet.applyState({
+    ...state,
+    closureCompanion: {
+      ...state.closureCompanion,
+      accounts: [{
+        host: 'codex', name: 'Codex', connected: true, source: 'thirdParty',
+        balance: { remaining: 12.34, unit: 'CNY' },
+        quota: [{ minutes: 300, remaining: 76.5 }],
+        credits: { balance: '42' },
+      }],
+    },
+  })
+  const canvas = document.querySelector('#dsh-closure-pet canvas')
+  const bounds = canvas.getBoundingClientRect()
+  let hit
+  for (let y = Math.max(bounds.top, 0); y < Math.min(bounds.bottom, innerHeight) && !hit; y += 4) {
+    for (let x = Math.max(bounds.left, 0); x < Math.min(bounds.right, innerWidth); x += 4) {
+      if (pet.hitTest(x, y)) {
+        hit = { clientX: x, clientY: y }
+        break
+      }
+    }
+  }
+  check(hit, 'Could not find a desktop pet hit point for the quota test')
+  canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 1, ...hit }))
+  const displayed = bubbleText.textContent.replace(/\s+/g, '')
+  check(['5小时额度还剩76.5%', 'ChatGPT积分还剩42', '账户余额12.34'].every(line => displayed.includes(line)),
+    'Middle click did not show official Codex quota and third-party balance together: ' + displayed)
+  pet.hideBubble()
 }
 
 export async function checkCursor(pet, { start, isPassingThrough, inspect }) {
