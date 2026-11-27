@@ -1,6 +1,8 @@
-/work/
-/dist/
+/archive/
 /production/
+/tauri/work/
+/tauri/dist/
+/tauri/local-toolchain/
+/tauri/local-runtime/
 **/node_modules/
-/outputs/closure-companion/.closure-profile/
 *.log
