@@ -8,7 +8,7 @@
 
 桌宠支持 Windows 10 和 11 的 64 位系统，需要 Microsoft Edge WebView2 Runtime。Windows 11 通常已自带，缺少时可从微软安装。[WebView2 下载](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)
 
-1. 下载并完整解压 Windows x64 便携 ZIP。当前工作区的发行文件在 `tauri/dist/`。[GitHub Releases](https://github.com/OndoP3901/Closure-Codex/releases)
+1. 下载并完整解压 Windows x64 完整 ZIP，包内带有桌宠和三套主题。当前工作区的发行文件在 `tauri/dist/`。[GitHub Releases](https://github.com/OndoP3901/Closure-Codex/releases)
 2. 双击 `closure-companion-tauri.exe`，桌宠就会出现在桌面上。
 3. **左键点击**触发互动，**按住左键拖动**可以换位置，**右键**打开设置或退出。连接应用后，**按一下鼠标滚轮**查看支持的额度或余额。
 
@@ -46,10 +46,10 @@ dsh plugin --profile desktop add "C:\解压目录\plugins\dsh-companion\dsh-clos
 
 ### DSH 主题
 
-已适配 DSH `0.2.2-rc.5`。下载独立的 `dsh-closure-codex-theme-0.1.2.tgz`，本地发行目录为 `tauri/dist/`。先在 DSH 中停用其他全局主题，打开 DSH 自带的终端并从托盘退出 DSH，再运行以下命令。将路径换成你本机主题包的位置。
+已适配 DSH `0.2.2-rc.5`。主题包在完整 ZIP 的 `themes/dsh/` 目录。先在 DSH 中停用其他全局主题，打开 DSH 自带的终端并从托盘退出 DSH，再运行以下命令。将路径换成你本机主题包的位置。
 
 ```powershell
-dsh plugin --profile desktop add "C:\Downloads\dsh-closure-codex-theme-0.1.2.tgz"
+dsh plugin --profile desktop add "C:\解压目录\themes\dsh\dsh-closure-codex-theme-0.1.2.tgz"
 ```
 
 重新打开 DSH 即可看到主题。在插件管理中停用或移除 `dsh-closure-codex-theme` 可恢复原外观。网页版安装时将 `--profile desktop` 换成 `--profile web`。
@@ -65,7 +65,7 @@ dsh plugin --profile desktop add "C:\Downloads\dsh-closure-codex-theme-0.1.2.tgz
 | [shared/companion/](shared/companion/) | 桌宠前端、Spine 模型与动画、Fusion Pixel 字体、语音和 WorkBuddy 状态观察脚本。 |
 | [shared/plugins/](shared/plugins/) | DSH 桌宠联动桥，负责向桌宠提供任务和账户状态。 |
 | [themes/](themes/) | `codex/`、`workbuddy/` 和 `dsh/` 分别维护各自的主题。主题测试位于 `themes/tests/`。 |
-| `tauri/dist/` | 本地便携 ZIP、桌宠 EXE、SHA-256 校验文件和独立 DSH 主题包。 |
+| `tauri/dist/` | 本地完整发行 ZIP、桌宠 EXE 和 SHA-256 校验文件。 |
 | `production/`、`archive/` | 本地宣传片工程与历史验证资料。 |
 
 ### 技术结构
