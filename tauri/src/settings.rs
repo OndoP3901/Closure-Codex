@@ -14,9 +14,11 @@ fn yes() -> bool {
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    pub theme_enabled: bool,
     pub codex_linked: bool,
     pub dsh_linked: bool,
     pub workbuddy_linked: bool,
+    pub antigravity_linked: bool,
     #[serde(default = "yes")]
     pub show_outside_codex: bool,
     pub start_at_login: bool,
@@ -25,9 +27,11 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            theme_enabled: true,
             codex_linked: false,
             dsh_linked: false,
             workbuddy_linked: false,
+            antigravity_linked: false,
             show_outside_codex: true,
             start_at_login: false,
         }
@@ -36,7 +40,7 @@ impl Default for Settings {
 
 impl Settings {
     pub fn linked(self) -> bool {
-        self.codex_linked || self.dsh_linked || self.workbuddy_linked
+        self.codex_linked || self.dsh_linked || self.workbuddy_linked || self.antigravity_linked
     }
 }
 
@@ -107,9 +111,11 @@ impl Runtime {
         let old = profile.settings;
         let mut next = old;
         match key {
+            "themeEnabled" => next.theme_enabled = enabled,
             "codexLinked" => next.codex_linked = enabled,
             "dshLinked" => next.dsh_linked = enabled,
             "workbuddyLinked" => next.workbuddy_linked = enabled,
+            "antigravityLinked" => next.antigravity_linked = enabled,
             "showOutsideCodex" => next.show_outside_codex = enabled,
             "startAtLogin" => next.start_at_login = enabled,
             _ => return Err(io::Error::other("未知桌宠设置。")),

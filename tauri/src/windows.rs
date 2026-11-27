@@ -9,7 +9,7 @@ use std::{
 };
 
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, HWND, INVALID_HANDLE_VALUE, POINT, RECT},
+    Foundation::{CloseHandle, HWND, INVALID_HANDLE_VALUE, LPARAM, POINT, RECT},
     Graphics::Gdi::ClientToScreen,
     NetworkManagement::IpHelper::{
         GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
@@ -23,9 +23,9 @@ use windows_sys::Win32::{
         Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
     },
     UI::WindowsAndMessaging::{
-        GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow, GetWindowLongPtrW,
-        GetWindowThreadProcessId, IsIconic, IsWindowVisible, GWL_EXSTYLE, GW_OWNER,
-        WS_EX_TOOLWINDOW,
+        EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow,
+        GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+        SetForegroundWindow, ShowWindowAsync, GWL_EXSTYLE, GW_OWNER, SW_RESTORE, WS_EX_TOOLWINDOW,
     },
 };
 
@@ -148,6 +148,46 @@ pub fn codex_window(path: &Path) -> bool {
         && (path.ends_with("\\app\\codex.exe") || path.ends_with("\\app\\chatgpt.exe"))
 }
 
+pub fn dsh_executable(local: &Path) -> PathBuf {
+    local.join("Programs/DeepSeek Harness/DeepSeek Harness.exe")
+}
+
+pub fn show_application(path: &Path) -> bool {
+    let mut target = (path, std::ptr::null_mut::<std::ffi::c_void>());
+    unsafe extern "system" fn find(window: HWND, data: LPARAM) -> i32 {
+        let (path, target) = &mut *(data as *mut (&Path, HWND));
+        if IsWindowVisible(window) == 0
+            || !GetWindow(window, GW_OWNER).is_null()
+            || GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW as isize != 0
+        {
+            return 1;
+        }
+        let mut class = [0; 48];
+        GetClassNameW(window, class.as_mut_ptr(), class.len() as i32);
+        if wide_string(&class) != "Chrome_WidgetWin_1" {
+            return 1;
+        }
+        let mut pid = 0;
+        GetWindowThreadProcessId(window, &mut pid);
+        if executable(pid).is_some_and(|exe| same_path(&exe, path)) {
+            *target = window;
+            return 0;
+        }
+        1
+    }
+    unsafe {
+        EnumWindows(Some(find), &mut target as *mut _ as LPARAM);
+        if target.1.is_null() {
+            return false;
+        }
+        if IsIconic(target.1) != 0 {
+            ShowWindowAsync(target.1, SW_RESTORE);
+        }
+        SetForegroundWindow(target.1);
+    }
+    true
+}
+
 pub fn foreground_bounds(
     settings: Settings,
     local: &Path,
@@ -172,12 +212,12 @@ pub fn foreground_bounds(
         GetWindowThreadProcessId(window, &mut pid);
         let exe = executable(pid)?;
         let allowed = (settings.codex_linked || !settings.linked()) && codex_window(&exe)
-            || settings.dsh_linked
-                && same_path(
-                    &exe,
-                    &local.join("Programs/DeepSeek Harness/DeepSeek Harness.exe"),
-                )
-            || settings.workbuddy_linked && same_path(&exe, workbuddy);
+            || settings.dsh_linked && same_path(&exe, &dsh_executable(local))
+            || settings.workbuddy_linked
+                && crate::workbuddy::runtime_executable(workbuddy)
+                    .is_some_and(|runtime| same_path(&exe, &runtime));
+        let allowed =
+            allowed || settings.antigravity_linked && crate::antigravity::is_app(&exe, local);
         if !allowed {
             return None;
         }

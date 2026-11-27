@@ -4,5 +4,6 @@
 /tauri/dist/
 /tauri/local-toolchain/
 /tauri/local-runtime/
+/启动/*.tgz
 **/node_modules/
 *.log

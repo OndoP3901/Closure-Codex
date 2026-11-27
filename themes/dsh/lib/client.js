@@ -146,34 +146,69 @@ function mount(doc) {
   }
 }
 
-function apply(ctx) {
+function applyAppearance(ctx) {
   // A registered theme id is temporary in DSH. Reapply after asynchronous
   // durable-preference hydration, remembering that latest preference for unload.
-  ctx.effect(() => {
-    const theme = ctx.theme
-    let restore = theme.getTheme().preference
-    const unregister = theme.register({ id: ID, colorScheme: 'dark', tokens: TOKENS })
-    let disposed = false, scheduled = false
-    const select = () => {
-      scheduled = false
-      if (!disposed && theme.getTheme().preference !== ID) theme.setTheme(ID)
+  const theme = ctx.theme
+  let restore = theme.getTheme().preference
+  const unregister = theme.register({ id: ID, colorScheme: 'dark', tokens: TOKENS })
+  let disposed = false, scheduled = false
+  const select = () => {
+    scheduled = false
+    if (!disposed && theme.getTheme().preference !== ID) theme.setTheme(ID)
+  }
+  const off = ctx.on('theme/change', snapshot => {
+    if (disposed || snapshot.preference === ID) return
+    restore = snapshot.preference
+    if (!scheduled) { scheduled = true; queueMicrotask(select) }
+  })
+  theme.setTheme(ID)
+  const unmount = typeof document === 'undefined' ? () => {} : mount(document)
+  return () => {
+    disposed = true
+    off()
+    unmount()
+    if (theme.getTheme().preference === ID) {
+      const available = restore === 'system' || theme.getTheme().themes.some(item => item.id === restore)
+      theme.setTheme(available ? restore : 'system')
     }
-    const off = ctx.on('theme/change', snapshot => {
-      if (disposed || snapshot.preference === ID) return
-      restore = snapshot.preference
-      if (!scheduled) { scheduled = true; queueMicrotask(select) }
-    })
-    theme.setTheme(ID)
-    const unmount = typeof document === 'undefined' ? () => {} : mount(document)
+    unregister()
+  }
+}
+
+function apply(ctx) {
+  ctx.effect(() => {
+    if (window.location?.protocol !== 'dsh-app:') return applyAppearance(ctx)
+
+    let disposed = false, pending = false, restoreAppearance
+    async function sync() {
+      if (pending) return
+      pending = true
+      try {
+        const response = await window.fetch('/api/closure-dsh-theme', {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(2000),
+        })
+        if (!response.ok) return
+        const { enabled } = await response.json()
+        if (disposed) return
+        if (enabled === true && !restoreAppearance) restoreAppearance = applyAppearance(ctx)
+        if (enabled === false && restoreAppearance) {
+          restoreAppearance()
+          restoreAppearance = undefined
+        }
+      } catch {
+        // The desktop host may be restarting. Keep the current appearance and retry.
+      } finally {
+        pending = false
+      }
+    }
+    void sync()
+    const timer = window.setInterval(sync, 500)
     return () => {
       disposed = true
-      off()
-      unmount()
-      if (theme.getTheme().preference === ID) {
-        const available = restore === 'system' || theme.getTheme().themes.some(item => item.id === restore)
-        theme.setTheme(available ? restore : 'system')
-      }
-      unregister()
+      window.clearInterval(timer)
+      restoreAppearance?.()
     }
   }, `${ID}: appearance and layout`)
 }

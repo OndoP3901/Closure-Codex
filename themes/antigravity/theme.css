@@ -1,0 +1,136 @@
+@media (forced-colors: none) {
+  :root {
+    color-scheme: dark;
+    --closure-surface: #0a0b16;
+    --closure-ink: #eef0ff;
+    --closure-sidebar: #101222;
+    --closure-line: #ff3ea5;
+    --closure-composer-focus: #998ab9;
+    --closure-code-header: #282838;
+    --closure-code-body: #181924;
+    --closure-code-divider: #524b65;
+    --closure-code-label: #c5c4d6;
+    --closure-edge: rgb(123 124 171 / 22%);
+    --closure-elevated: color-mix(in srgb, var(--closure-surface), var(--closure-ink) 6%);
+    --closure-grid: rgb(238 240 255 / 5%);
+    --closure-menu-paint:
+      repeating-linear-gradient(90deg, var(--closure-grid) 0 1px, transparent 1px 8px),
+      repeating-linear-gradient(0deg, var(--closure-grid) 0 1px, transparent 1px 8px),
+      linear-gradient(180deg, #3a3fd8, #2b30b8 45%, transparent),
+      linear-gradient(90deg, #3a3fd8, #2b30b8 45%, transparent);
+    --closure-ambient:
+      radial-gradient(ellipse at 82% 4%, rgb(126 14 228 / 7%), transparent 60%),
+      radial-gradient(ellipse at 50% 115%, rgb(66 58 216 / 13%), transparent 70%);
+    --closure-font: "Cascadia Mono", "DengXian", "等线", "Microsoft YaHei UI", "Microsoft YaHei", ui-monospace, monospace;
+    --closure-code-font: "Cascadia Mono", Consolas, "DengXian", "等线", "Microsoft YaHei UI", "Microsoft YaHei", ui-monospace, monospace;
+    --closure-folder-closed: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Cpath fill='%23c7cad9' d='M1 3h5v1h1v1h8v9H1z'/%3E%3Cpath fill='%2361677e' d='M2 4h3v1h1v1h8v7H2z'/%3E%3C/svg%3E");
+    --closure-folder-open: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Cpath fill='%23c7cad9' d='M1 2h5v1h1v1h7v9H1z'/%3E%3Cpath fill='%2361677e' d='M2 3h3v1h1v1h7v7H2z'/%3E%3Cpath fill='%23f0eef8' d='M4 5h8v4H4z'/%3E%3Cpath fill='%23c7cad9' d='M3 7h13v2h-1v2h-1v3H1v-3h1V8h1z'/%3E%3Cpath fill='%2361677e' d='M4 8h11v1h-1v2h-1v2H2v-2h1V9h1z'/%3E%3C/svg%3E");
+  }
+
+  :is(:root, body, .agy-shell, .agy-inset-shell) {
+    --background: var(--closure-surface) !important;
+    --shell-canvas: var(--closure-surface) !important;
+    --foreground: var(--closure-ink) !important;
+    --card: var(--closure-elevated) !important;
+    --card-foreground: var(--closure-ink) !important;
+    --popover: var(--closure-elevated) !important;
+    --popover-foreground: var(--closure-ink) !important;
+    --muted: color-mix(in srgb, var(--closure-surface), var(--closure-ink) 8%) !important;
+    --muted-foreground: color-mix(in srgb, var(--closure-ink) 65%, transparent) !important;
+    --accent: color-mix(in srgb, var(--closure-surface), var(--closure-line) 15%) !important;
+    --accent-foreground: var(--closure-ink) !important;
+    --primary: var(--closure-line) !important;
+    --primary-foreground: var(--closure-sidebar) !important;
+    --border: color-mix(in srgb, var(--closure-ink) 14%, transparent) !important;
+    --input: var(--border) !important;
+    --ring: var(--closure-composer-focus) !important;
+    --sidebar: var(--closure-sidebar) !important;
+    --sidebar-foreground: var(--closure-ink) !important;
+    --sidebar-accent: color-mix(in srgb, var(--closure-sidebar), var(--closure-ink) 14%) !important;
+    --sidebar-accent-foreground: var(--closure-ink) !important;
+    --sidebar-border: var(--closure-edge) !important;
+    --sidebar-ring: var(--closure-composer-focus) !important;
+    --ag-cs-sidebar: var(--closure-sidebar) !important;
+    --ag-cs-composer-bg: var(--closure-elevated) !important;
+    --ag-cs-hover-wash: color-mix(in srgb, var(--closure-ink) 8%, transparent) !important;
+    --ag-cs-border-1: var(--border) !important;
+    --ag-sidebar-text-strong: var(--closure-ink) !important;
+    --ag-sidebar-label: var(--muted-foreground) !important;
+    --font-sans: var(--closure-font) !important;
+    --font-mono: var(--closure-code-font) !important;
+  }
+
+  body, .agy-shell, .agy-inset-shell {
+    background-color: var(--closure-surface) !important;
+    color: var(--closure-ink);
+    font-family: var(--closure-font);
+  }
+
+  :is(button, input, textarea, select, [contenteditable="true"]) { font-family: inherit; }
+  :is(code, pre, kbd) { font-family: var(--closure-code-font); }
+
+  /* The menu spans the app. The pane toolbar below it uses the workspace background. */
+  .agy-shell > :has([data-testid="title-menu-bar"]) {
+    background: var(--closure-menu-paint), #1d2180 !important;
+    box-shadow: inset 0 -1px var(--closure-line), inset 0 1px rgb(255 255 255 / 5%);
+  }
+  [data-testid="title-menu-bar"] { background-color: transparent !important; }
+
+  [data-testid="sidebar-split"] > :first-child:has([data-testid="sidebar-navigation-items"]) {
+    background: var(--closure-sidebar) !important;
+    box-shadow: inset -1px 0 var(--closure-edge);
+  }
+  :is(.agy-home, [data-testid="conversation-view"], [data-testid="overview-panel"]) {
+    background: var(--closure-ambient), var(--closure-surface) !important;
+  }
+
+  [data-testid="conversation-row-sidebar"]:is([data-selected="true"], [aria-current="page"]) {
+    background-color: color-mix(in srgb, var(--closure-sidebar), var(--closure-ink) 10%);
+    background-image: linear-gradient(var(--closure-line), var(--closure-line));
+    background-size: 2px 16px;
+    background-position: left 5px center;
+    background-repeat: no-repeat;
+  }
+
+  [data-testid="project-header"][aria-expanded] {
+    --closure-folder-icon: var(--closure-folder-closed);
+  }
+  [data-testid="project-header"][aria-expanded="true"] {
+    --closure-folder-icon: var(--closure-folder-open);
+  }
+  [data-testid="project-header"][aria-expanded] span.relative.inline-flex > svg:first-child {
+    background: var(--closure-folder-icon) center / contain no-repeat;
+    & > :is(path, g, use, rect, polyline, polygon, line) { visibility: hidden; }
+  }
+
+  .surface-composer-card:has(:is([contenteditable="true"], textarea):focus) {
+    outline: 1px solid var(--closure-composer-focus);
+    outline-offset: -1px;
+  }
+  [data-testid="agent-input-box"] button[data-testid="send-button"]:enabled {
+    background-color: var(--closure-line);
+    color: var(--closure-sidebar);
+  }
+
+  [data-testid="conversation-view"] pre {
+    background-color: var(--closure-code-body) !important;
+  }
+  [data-testid="conversation-view"] :has(> pre) > :has(button[aria-label="Copy code"]):has(+ pre) {
+    background-color: var(--closure-code-header);
+    color: var(--closure-code-label);
+    box-shadow: inset 0 -1px var(--closure-code-divider);
+    & button:is(:hover, :focus-visible) { background-color: var(--closure-code-divider); }
+  }
+
+  :root::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 2147483645;
+    pointer-events: none;
+    user-select: none;
+    background-image:
+      repeating-linear-gradient(180deg, rgb(255 255 255 / 1.12%) 0 1px, rgb(0 0 0 / 0.88%) 1px 3px),
+      radial-gradient(ellipse 130% 110% at 50% 0%, transparent 62%, rgb(8 8 16 / 26%) 100%);
+  }
+}

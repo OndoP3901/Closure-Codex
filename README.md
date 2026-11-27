@@ -1,28 +1,42 @@
 # 可露希尔的 Codex
 
-让可露希尔待在 Windows 桌面上。你可以拖动她、点击互动，也可以让她在 Codex、WorkBuddy 或 DSH 开始和完成任务时做动作、说台词。三个应用各有独立的可露希尔深色主题，桌宠和主题可以分别使用。
+让可露希尔待在 Windows 桌面上。你可以拖动她、点击互动，也可以让她在 Codex、WorkBuddy、DSH 或 Antigravity 开始和完成任务时做动作、说台词。桌宠菜单可以启动这四款应用并开启可露希尔深色主题。
 
 [快速上手](#快速上手) · [连接你的工具](#连接你的工具) · [安装深色主题](#安装深色主题) · [开发指南](#开发指南) · [更新日志](CHANGELOG.md)
+
+## 仓库启动入口
+
+双击 [启动桌宠.vbs](启动/启动桌宠.vbs)，然后从桌宠菜单启动各应用。桌宠入口优先选择最近构建的本地 Release EXE，本地构建缺失时使用 `tauri/dist` 中的 EXE。[生成并安装 DSH 主题](启动/DSH%20主题安装.md)
 
 ## 快速上手
 
 桌宠支持 Windows 10 和 11 的 64 位系统，需要 Microsoft Edge WebView2 Runtime。Windows 11 通常已自带，缺少时可从微软安装。[WebView2 下载](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)
 
-1. 下载并完整解压 Windows x64 完整 ZIP，包内带有桌宠和三套主题。当前工作区的发行文件在 `tauri/dist/`。[GitHub Releases](https://github.com/OndoP3901/Closure-Codex/releases)
+1. 下载 v0.10.0 的 Windows x64 桌宠 EXE。需要 DSH 插件或 Antigravity Hooks 安装脚本时，可下载完整 ZIP 并解压到常用目录。发行文件在 [GitHub Releases](https://github.com/OndoP3901/Closure-Codex/releases)，本地构建的发行包位于 `tauri/dist/`。
 2. 双击 `closure-companion-tauri.exe`，桌宠就会出现在桌面上。
 3. **左键点击**触发互动，**按住左键拖动**可以换位置，**右键**打开设置或退出。连接应用后，**按一下鼠标滚轮**查看支持的额度或余额。
 
 右键菜单可以调整角色大小、透明度、气泡、配音语言和音量。取消「在桌面和其他软件中显示」，可让桌宠只跟随前台的联动应用。开机自启默认关闭。开启前请把程序放到长期使用的目录，因为 Windows 会记住它的完整路径。
 
+### 首次配置
+
+使用桌宠的动画、语音和菜单只需满足上面的 WebView2 要求。使用主题或联动前，请先安装相应的桌面客户端，并在需要时登录。
+
+- **Node.js 22 或更新版本**。使用 Codex 主题，或从桌宠菜单启动 WorkBuddy、Antigravity 时，需要单独安装 Node.js。在新开的终端运行 `node --version` 确认版本，再启动桌宠。[Node.js 官方下载](https://nodejs.org/zh-cn/download)
+- **DSH**。使用主题前安装主题插件 0.1.4，使用任务联动和余额显示前安装桌宠联动桥。安装或更新插件后，从系统托盘退出 DSH，再从桌宠菜单启动。[主题插件安装](#dsh-主题) · [联动桥安装](#dsh)
+- **Antigravity**。首次启用任务联动时，先把桌宠 EXE 放在长期使用的目录，再运行一次 Hooks 安装脚本。[Hooks 安装步骤](#antigravity)
+
 ## 连接你的工具
+
+右键打开桌宠菜单，在各应用连接状态右侧点击「启动」。顶部的「启用主题」默认开启，会记住选择，并在从菜单启动应用时生效。关闭后仍可使用联动。DSH 主题插件 0.1.4 起支持在从菜单启动时更新已打开的 DSH 窗口。
 
 ### Codex
 
-打开 Microsoft Store 版 Codex，然后在桌宠的右键菜单勾选「Codex 联动」。
+安装 Microsoft Store 版 Codex 后，从桌宠菜单启动。首次加载主题会先识别原有配置，并可能重启一次 Codex。启动前请保存工作。
 
 ### WorkBuddy
 
-先保存工作并从系统托盘退出普通启动的 WorkBuddy。通过下文的 [WorkBuddy 主题入口](#workbuddy-主题) 打开应用，再勾选「WorkBuddy 联动」。
+从桌宠菜单启动 WorkBuddy 会应用主题并开启联动端口。普通 WorkBuddy 已打开时，请先保存工作并从系统托盘退出。
 
 ### DSH
 
@@ -32,27 +46,45 @@
 dsh plugin --profile desktop add "C:\解压目录\plugins\dsh-companion\dsh-closure-companion-bridge-0.1.2.tgz"
 ```
 
-重新打开 DSH，勾选「DSH 联动」。桌宠可以跟随任务，按下鼠标滚轮可查看 DSH 钱包的充值和赠送余额。关闭联动开关可暂停读取，在 DSH 插件管理中移除 `dsh-closure-companion-bridge` 可卸载插件。
+从桌宠菜单点击 DSH 旁的「启动」。桌宠可以跟随任务，按下鼠标滚轮可查看 DSH 钱包的充值和赠送余额。关闭联动开关可暂停读取，在 DSH 插件管理中移除 `dsh-closure-companion-bridge` 可卸载插件。
+
+### Antigravity
+
+适用于 Windows 上独立的 Google Antigravity App。将桌宠 EXE 放在长期使用的目录，再运行完整 ZIP 中的 Hooks 安装脚本。下面的命令从 ZIP 解压后的根目录执行，把 EXE 路径换成实际位置。从源码配置时，脚本在 `shared/plugins/antigravity-companion-bridge/`。
+
+```powershell
+& '.\plugins\antigravity-companion-bridge\Install-Hooks.ps1' -CompanionExe 'C:\桌宠\closure-companion-tauri.exe'
+```
+
+重新打开 Antigravity，在桌宠右键菜单勾选「Antigravity 联动」，再在 Antigravity 中运行一次任务。桌宠收到任务事件或连上额度来源后，菜单会显示「已连接」。当前提供任务开始、完成、失败和中断状态。关闭联动开关可暂停接收，使用同一脚本加 `-Remove` 可移除可露希尔的 Hooks。安装器会备份原有全局 Hooks 文件。 [Google Hooks 文档](https://antigravity.google/docs/hooks)
+
+通过桌宠菜单启动 Antigravity 后，在桌宠上按下鼠标滚轮，可查看当前模型所属额度池提供的剩余额度。客户端提供 5 小时额度或周额度时，气泡会显示对应周期。
 
 ## 安装深色主题
 
 ### Codex 主题
 
-安装 Node.js 22 或更新版本，先正常打开 Microsoft Store 版 Codex 并保存工作，再双击启用脚本。首次启用可能重启 Codex 一次，之后可以用桌面或开始菜单里的主题快捷方式启动。要恢复原外观，保存工作后双击恢复脚本。[启用主题](themes/codex/Enable-Codex-Theme.vbs) · [恢复原外观](themes/codex/Restore-Codex-Appearance.vbs)
+在桌宠菜单点击 Codex 右侧的「启动」。开启或关闭主题时，可能需要重新启动 Codex，请先保存工作。
 
 ### WorkBuddy 主题
 
-已适配 Windows x64 的 WorkBuddy 5.11.3。安装 Node.js 22 或更新版本，保存工作并从托盘退出 WorkBuddy，再双击启用脚本。恢复脚本会在当前窗口撤销主题。下次可以用原来的 WorkBuddy 图标启动。[启用主题](themes/workbuddy/Enable-Theme.vbs) · [恢复原外观](themes/workbuddy/Restore-Theme.vbs)
+支持 Windows x64 的 WorkBuddy 5.11.3 和 5.12.1。在桌宠菜单点击 WorkBuddy 右侧的「启动」。
 
 ### DSH 主题
 
-已适配 DSH `0.2.2-rc.5`。主题包在完整 ZIP 的 `themes/dsh/` 目录。先在 DSH 中停用其他全局主题，打开 DSH 自带的终端并从托盘退出 DSH，再运行以下命令。将路径换成你本机主题包的位置。
+已适配 DSH `0.2.2-rc.5`。在完整 ZIP 的 `themes/dsh/` 中获取 0.1.4 主题包。从源码构建时可在仓库的「启动」目录生成安装包。先在 DSH 中停用其他全局主题，然后执行下面的命令。将路径换成你本机主题包的位置。[从源码生成主题包](启动/DSH%20主题安装.md)
 
 ```powershell
-dsh plugin --profile desktop add "C:\解压目录\themes\dsh\dsh-closure-codex-theme-0.1.2.tgz"
+dsh plugin --profile desktop add "C:\解压目录\themes\dsh\dsh-closure-codex-theme-0.1.4.tgz"
 ```
 
-重新打开 DSH 即可看到主题。在插件管理中停用或移除 `dsh-closure-codex-theme` 可恢复原外观。网页版安装时将 `--profile desktop` 换成 `--profile web`。
+安装后，从系统托盘退出 DSH，再从桌宠菜单启动。在插件管理中停用或移除 `dsh-closure-codex-theme` 可恢复原外观。网页版安装时将 `--profile desktop` 换成 `--profile web`。
+
+### Antigravity 主题
+
+普通 Antigravity 已打开时，先保存工作并退出，再在桌宠菜单点击 Antigravity 右侧的「启动」。退出 Antigravity 时本机调试端口随之关闭。
+
+主题沿用 Codex、WorkBuddy 和 DSH 的深色配色、紫蓝网格顶栏、洋红强调色和 Cascadia Mono 字体栈。
 
 ## 开发指南
 
@@ -60,11 +92,12 @@ dsh plugin --profile desktop add "C:\解压目录\themes\dsh\dsh-closure-codex-t
 
 | 目录 | 职责 |
 | --- | --- |
+| [启动/](启动/) | 桌宠启动入口和 DSH 主题安装说明。 |
 | [tauri/src/](tauri/src/) | Rust 宿主、Windows 窗口与鼠标穿透、设置与自启、音频、应用联动以及测试。 |
 | [tauri/frontend/](tauri/frontend/) | WebView2 页面入口、Tauri 命令桥接和界面冒烟测试。 |
 | [shared/companion/](shared/companion/) | 桌宠前端、Spine 模型与动画、Fusion Pixel 字体、语音和 WorkBuddy 状态观察脚本。 |
-| [shared/plugins/](shared/plugins/) | DSH 桌宠联动桥，负责向桌宠提供任务和账户状态。 |
-| [themes/](themes/) | `codex/`、`workbuddy/` 和 `dsh/` 分别维护各自的主题。主题测试位于 `themes/tests/`。 |
+| [shared/plugins/](shared/plugins/) | DSH 桌宠联动桥和 Antigravity 任务 Hooks 安装器。 |
+| [themes/](themes/) | Codex、WorkBuddy、DSH 和 Antigravity 的独立主题。主题测试位于 `themes/tests/`。 |
 | `tauri/dist/` | 本地完整发行 ZIP、桌宠 EXE 和 SHA-256 校验文件。 |
 | `production/`、`archive/` | 本地宣传片工程与历史验证资料。 |
 
@@ -72,8 +105,8 @@ dsh plugin --profile desktop add "C:\解压目录\themes\dsh\dsh-closure-codex-t
 
 - **Rust 宿主**使用 Tauri 2、WebView2 和 Windows API 管理透明窗、鼠标穿透和进程。Rust 使用 Rodio 与 Lewton 播放配音。联动和自启设置写入 `%LOCALAPPDATA%\ClosureCompanionTauri\profile.json`，外观与位置使用同目录下的 WebView2 配置。[宿主入口](tauri/src/main.rs) · [设置读写](tauri/src/settings.rs)
 - **桌宠前端**使用 HTML、CSS 和原生 JavaScript。Spine 动画优先用 WebGL，初始化不可用时切换到 Canvas 2D。Cargo 构建时，`build.rs` 把页面和素材组装进 `tauri/.generated/frontend/`，由 Tauri 嵌入 EXE。[构建脚本](tauri/build.rs) · [渲染入口](shared/companion/upstream/assets/src/main.js)
-- **应用联动**由 Rust 汇总后通过 Tauri 命令传给前端。Codex 适配器读取本地会话事件并查询账户额度，WorkBuddy 适配器使用宿主的本机连接和账户接口，DSH 插件通过 `%LOCALAPPDATA%\ClosureCompanion\bridges` 交换任务状态、用量与余额。[联动状态](tauri/src/linked.rs) · [DSH 插件入口](shared/plugins/dsh-closure-companion-bridge/lib/index.js)
-- **主题**由各宿主加载。Codex 和 WorkBuddy 使用 PowerShell 与 Node.js 启动器，通过本机 Chrome DevTools Protocol 加载样式。DSH 通过自身的插件机制加载主题，主题和桌宠联动桥各有一个包。[Codex 配色和样式](themes/codex/) · [WorkBuddy 主题源码](themes/workbuddy/src/) · [DSH 主题源码](themes/dsh/src/)
+- **应用联动**由 Rust 汇总后通过 Tauri 命令传给前端。Codex 读取会话事件并查询额度，WorkBuddy 使用宿主的本机连接，DSH 插件写入任务和账户状态，Antigravity 官方 Hooks 写入任务事件。后两者的桥接文件在 `%LOCALAPPDATA%\ClosureCompanion\bridges`。[联动状态](tauri/src/linked.rs) · [Antigravity 适配器](tauri/src/antigravity.rs)
+- **主题**由各宿主加载。桌宠 EXE 内置 Codex、WorkBuddy 和 Antigravity 的主题文件，通过 Node.js 启动器和本机 Chrome DevTools Protocol 加载样式。DSH 通过自身的插件机制加载主题。[Codex 配色和样式](themes/codex/) · [WorkBuddy 主题源码](themes/workbuddy/src/) · [DSH 主题源码](themes/dsh/src/) · [Antigravity 主题源码](themes/antigravity/)
 
 ### 构建与测试桌宠
 

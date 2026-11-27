@@ -66,7 +66,7 @@ test('missing saved profile is reported without substituting a fresh account dir
     await assert.rejects(prepareConnection({api:{startPackaged:async()=>{throw new Error('Must not start a fresh profile')}},pkg:{},config:{profile:path.join(root,'gone')},codexHome:'home',processes:[]}),/配置目录已不存在/)
   }finally{await fs.rm(root,{recursive:true,force:true})}
 })
-test('failed debug startup restores the exact ordinary profile and does not create shortcuts',async()=>{
+test('failed debug startup restores the exact ordinary profile',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'closure-theme-fallback-'))
   try {
     const profile=path.join(root,'original');await fs.mkdir(profile)
@@ -80,7 +80,6 @@ test('failed debug startup restores the exact ordinary profile and does not crea
       closeTarget:async(pkg,value)=>calls.push(['close',value.pid]),
       startPackaged:async(pkg,value,home,port)=>calls.push(['start',value,port]),
       waitBrowser:async()=>{throw new Error('unsupported CDP')},
-      createShortcuts:async()=>{throw new Error('Must not create shortcuts after failure')},
     }),/unsupported CDP/)
     assert.deepEqual(calls,[['close',123],['start',profile,19339],['close',124],['start',profile,null]])
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'session.json'),'utf8')).running,false)
@@ -112,10 +111,10 @@ test('restore closes only the recorded profile and leaves other Codex instances 
       findPackage:async()=>({executable:'official.exe'}),getProcesses:async()=>[current,{pid:11,profile:path.join(root,'unrelated'),port:19341}],
       stopInjector:async value=>calls.push(['injector',value.injectorPid]),verifyOwner:async port=>calls.push(['verify',port]),
       stopProjectInjectors:async browser=>calls.push(['stop',browser]),closeTarget:async(pkg,value)=>calls.push(['close',value.pid]),
-      startPackaged:async(pkg,value,codexHome,port)=>calls.push(['start',value,codexHome,port]),removeShortcuts:async()=>calls.push(['links']),
+      startPackaged:async(pkg,value,codexHome,port)=>calls.push(['start',value,codexHome,port]),
     })
     assert.equal(result.ok,true)
-    assert.deepEqual(calls,[['injector',100],['verify',19340],['stop',record.browser],['close',10],['start',profile,home,null],['links']])
+    assert.deepEqual(calls,[['injector',100],['verify',19340],['stop',record.browser],['close',10],['start',profile,home,null]])
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'config.json'),'utf8')).enabled,false)
   } finally {await fs.rm(root,{recursive:true,force:true})}
 })

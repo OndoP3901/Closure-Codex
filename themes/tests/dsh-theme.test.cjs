@@ -5,13 +5,13 @@ const path = require('node:path')
 const vm = require('node:vm')
 const root = path.resolve(__dirname, '../dsh')
 
-function load() {
+function load(desktop = {}) {
   let plugin
   vm.runInNewContext(fs.readFileSync(path.join(root, 'lib/client.js'), 'utf8'), {
     window: { __ModuleLoader__: { load({ id, factory }) {
       assert.equal(id, 'dsh-closure-codex-theme')
       plugin = factory()
-    } } }, queueMicrotask,
+    } }, ...desktop }, queueMicrotask, AbortSignal,
   })
   return plugin
 }
@@ -75,4 +75,32 @@ test('unloading during a pending reapply never reactivates the disposed plugin',
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(ctx.theme.getTheme().preference, 'dark')
   assert.equal(ctx.themes.has('dsh-closure-codex-theme'), false)
+})
+
+test('the desktop theme stays off at startup and follows changes in the same window', async () => {
+  const ctx = themeHost()
+  let enabled = false
+  let poll
+  const client = load({
+    location: { protocol: 'dsh-app:' },
+    fetch: async url => {
+      assert.equal(url, '/api/closure-dsh-theme')
+      return { ok: true, json: async () => ({ enabled }) }
+    },
+    setInterval(callback) { poll = callback },
+    clearInterval() { poll = undefined },
+  })
+  client.apply(ctx)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(ctx.theme.getTheme().preference, 'light')
+  enabled = true
+  await poll()
+  assert.equal(ctx.theme.getTheme().preference, 'dsh-closure-codex-theme')
+  ctx.theme.setTheme('dark')
+  enabled = false
+  await poll()
+  assert.equal(ctx.theme.getTheme().preference, 'dark')
+  assert.equal(ctx.themes.has('dsh-closure-codex-theme'), false)
+  ctx.dispose()
+  assert.equal(poll, undefined)
 })

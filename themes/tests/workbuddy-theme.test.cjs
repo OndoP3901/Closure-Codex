@@ -2,8 +2,36 @@ const test=require('node:test')
 const assert=require('node:assert/strict')
 const path=require('node:path')
 const fs=require('node:fs')
-const {selectTarget,run}=require('../workbuddy/lib/launcher.cjs')
+const os=require('node:os')
+const {findInstall,selectTarget,run}=require('../workbuddy/lib/launcher.cjs')
 const {validateEndpoint}=require('../workbuddy/lib/cdp.cjs')
+
+test('WorkBuddy resolves the activated runtime and also supports flat installs',async t=>{
+  const local=fs.mkdtempSync(path.join(os.tmpdir(),'closure-wb-install-'))
+  t.after(()=>fs.rmSync(local,{recursive:true,force:true}))
+  const directory=path.join(local,'Programs','WorkBuddy')
+  const launcher=path.join(directory,'WorkBuddy.exe')
+  const runtime=path.join(directory,'versions','5.12.1')
+  const executable=path.join(runtime,'WorkBuddy-app.exe')
+  const activation=path.join(directory,'activation.record')
+  fs.mkdirSync(path.join(runtime,'resources'),{recursive:true})
+  fs.writeFileSync(launcher,'')
+  fs.writeFileSync(executable,'')
+  fs.writeFileSync(path.join(runtime,'resources','app.asar'),'')
+  fs.writeFileSync(activation,'WB-ACTIVATION-1\r\nignored\r\nignored\r\n5.12.1\r\n')
+  assert.deepEqual(await findInstall(local,''),{
+    launcher,executable,renderer:path.join(runtime,'resources','app.asar','renderer','index.html')
+  })
+  fs.writeFileSync(activation,'WB-ACTIVATION-1\r\nignored\r\nignored\r\n../5.12.1\r\n')
+  await assert.rejects(findInstall(local,''),/未找到 WorkBuddy/)
+  fs.rmSync(activation)
+  fs.mkdirSync(path.join(directory,'resources'))
+  fs.writeFileSync(path.join(directory,'resources','app.asar'),'')
+  assert.deepEqual(await findInstall(local,''),{
+    launcher,executable:launcher,renderer:path.join(directory,'resources','app.asar','renderer','index.html')
+  })
+})
+
 test('theme startup selects one owning window and rejects ambiguous running profiles',()=>{
   const main={pid:1,hasWindow:true},worker={pid:2,hasWindow:false}
   assert.equal(selectTarget([worker,main]),main)

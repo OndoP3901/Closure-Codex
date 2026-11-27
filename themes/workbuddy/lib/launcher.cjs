@@ -9,18 +9,27 @@ const readJson=file=>fs.readFile(file,'utf8').then(JSON.parse).catch(()=>null)
 async function writeJson(file,value){await fs.writeFile(file+'.tmp',JSON.stringify(value,null,2));await fs.rename(file+'.tmp',file)}
 const equalPath=(a,b)=>typeof a==='string'&&typeof b==='string'&&path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase()
 const defaultRoot=()=>path.join(process.env.LOCALAPPDATA,'ClosureWorkBuddyTheme')
-async function findInstall(){
-  const candidates=[process.env.CLOSURE_WORKBUDDY_EXE,path.join(process.env.LOCALAPPDATA,'Programs/WorkBuddy/WorkBuddy.exe')].filter(Boolean)
-  for(const executable of candidates){
-    if(!await fs.stat(executable).then(s=>s.isFile()).catch(()=>false))continue
+async function findInstall(local=process.env.LOCALAPPDATA, override=process.env.CLOSURE_WORKBUDDY_EXE){
+  const isFile=file=>fs.stat(file).then(stat=>stat.isFile()).catch(()=>false)
+  const candidates=[override,path.join(local,'Programs/WorkBuddy/WorkBuddy.exe')].filter(Boolean)
+  for(const launcher of candidates){
+    if(!await isFile(launcher))continue
+    const directory=path.dirname(launcher)
+    let executable=launcher
+    if(!await isFile(path.join(directory,'resources/app.asar'))){
+      const [format,,,version]=(await fs.readFile(path.join(directory,'activation.record'),'utf8').catch(()=> '')).split(/\r?\n/)
+      if(format!=='WB-ACTIVATION-1'||!/^\d+\.\d+\.\d+$/.test(version||''))continue
+      executable=path.join(directory,'versions',version,'WorkBuddy-app.exe')
+      if(!await isFile(executable)||!await isFile(path.join(path.dirname(executable),'resources/app.asar')))continue
+    }
     const renderer=path.join(path.dirname(executable),'resources/app.asar/renderer/index.html')
-    return {executable,renderer}
+    return {launcher,executable,renderer}
   }
   throw Error('未找到 WorkBuddy；请先安装桌面版，或设置 CLOSURE_WORKBUDDY_EXE。')
 }
 async function getProcesses(pkg){
   const result=await powershellJson(`
-    @(Get-CimInstance Win32_Process -Filter "Name='WorkBuddy.exe'" | Where-Object {
+    @(Get-CimInstance Win32_Process -Filter "Name='WorkBuddy.exe' OR Name='WorkBuddy-app.exe'" | Where-Object {
       $_.ExecutablePath -eq $env:CLOSURE_WB_EXE -and $_.CommandLine -notmatch '\\s--type=' -and
       $_.CommandLine -notmatch '(?:app\\.asar|daemon|worker|utility)'
     } | ForEach-Object {
@@ -82,7 +91,7 @@ async function startWorkBuddy(pkg,port){
   delete env.WORKBUDDY_REMOTE_DEBUGGING_PORT
   if(port)env.WORKBUDDY_REMOTE_DEBUGGING_PORT=String(port)
   const args=port?['--remote-debugging-address=127.0.0.1']:[]
-  const child=spawn(pkg.executable,args,{detached:true,windowsHide:true,stdio:'ignore',env})
+  const child=spawn(pkg.launcher,args,{detached:true,stdio:'ignore',env})
   await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject)})
   child.unref()
 }
@@ -121,11 +130,21 @@ async function run(options,services={}){
   const pkg=await api.findInstall()
   let processes=await api.getProcesses(pkg),target=selectTarget(processes)
   if(options.mode==='inspect')return {ok:true,installed:pkg,target,theme:previous?.running===true}
-  await fs.readFile(path.join(__dirname,'renderer.js'),'utf8')
-  if(typeof WebSocket!=='function')throw Error('主题需要 Node.js 22 或更新版本。')
+  if(options.mode==='enable'){
+    await fs.readFile(path.join(__dirname,'renderer.js'),'utf8')
+    if(typeof WebSocket!=='function')throw Error('主题需要 Node.js 22 或更新版本。')
+  }
   let port,browser
-  if(previous?.browser&&equalPath(previous.executable,pkg.executable)){
-    try{await api.verifyOwner(previous.port,pkg);browser=await api.waitBrowser(pkg,previous.port);port=previous.port;if(previous.running&&browser===previous.browser)await api.stopHelper(previous)}catch{browser=null}
+  if(previous?.browser&&(equalPath(previous.executable,pkg.executable)||equalPath(previous.executable,pkg.launcher))){
+    try{await api.verifyOwner(previous.port,pkg);browser=await api.waitBrowser(pkg,previous.port);port=previous.port}catch{browser=null}
+    if(previous.running&&browser&&browser===previous.browser)await api.stopHelper(previous)
+  }
+  if(!browser){
+    // The previous desktop-pet launcher may have started a link-only session.
+    const linked=await readJson(path.join(process.env.LOCALAPPDATA,'ClosureCompanion/workbuddy-session.json'))
+    if((equalPath(linked?.executable,pkg.executable)||equalPath(linked?.executable,pkg.launcher))&&Number.isInteger(linked.port)&&linked.port>=1024&&linked.port<=65535){
+      try{await api.verifyOwner(linked.port,pkg);browser=await api.waitBrowser(pkg,linked.port);port=linked.port}catch{browser=null}
+    }
   }
   if(!browser){
     const configDir=process.env.WORKBUDDY_CONFIG_DIR||process.env.CODEBUDDY_CONFIG_DIR||path.join(process.env.USERPROFILE,'.workbuddy')
@@ -135,6 +154,10 @@ async function run(options,services={}){
     if(target){await api.closeTarget(pkg,target);target=null}
     await api.startWorkBuddy(pkg,port)
     browser=await api.waitBrowser(pkg,port)
+  }
+  if(options.mode==='link'){
+    await writeJson(sessionFile,{running:false,executable:pkg.executable,port,browser})
+    return {ok:true,message:'WorkBuddy 联动已就绪。'}
   }
   const state=path.join(root,'helper.json'),control=path.join(root,'control.json')
   await fs.unlink(control).catch(error=>{if(error.code!=='ENOENT')throw error})
@@ -149,15 +172,15 @@ async function run(options,services={}){
   await writeJson(sessionFile,record)
   for(let n=0;n<60;n++){
     const value=await readJson(state)
-    if(value?.pid===helper.pid&&value.targets?.some(t=>t.installed&&t.menu))return {ok:true,message:'WorkBuddy 深色主题已启用。以后使用本主题入口启动。'}
+    if(value?.pid===helper.pid&&value.targets?.some(t=>t.installed&&t.menu))return {ok:true,message:'WorkBuddy 深色主题已启用。'}
     if(value?.pid===helper.pid&&!value.running)throw Error('主题助手已退出，请查看 helper.log。')
     await delay(250)
   }
-  return {ok:true,message:'主题助手已连接；WorkBuddy 主界面加载后会自动应用。'}
+  throw Error('WorkBuddy 已打开，但没有确认主题已加载。请重试。')
 }
 async function main(){
   const {values}=parseArgs({options:{mode:{type:'string',default:'enable'},root:{type:'string'}}})
-  if(!['enable','disable','inspect'].includes(values.mode))throw Error('Invalid mode')
+  if(!['enable','disable','inspect','link'].includes(values.mode))throw Error('Invalid mode')
   const root=path.resolve(values.root||defaultRoot())
   await fs.mkdir(root,{recursive:true})
   let lock

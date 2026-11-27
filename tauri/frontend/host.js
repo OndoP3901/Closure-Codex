@@ -4,22 +4,24 @@ let wantsPointer = false
 const voiceEpoch = Math.floor(performance.timeOrigin) * 1024
 const untouchedAtLoad = !navigator.userActivation.hasBeenActive
 
+function applyRuntimeSetting(result) {
+  const linked = String(Boolean(result.codexLinked || result.dshLinked || result.workbuddyLinked || result.antigravityLinked))
+  if (result.ok && !parameters.has('smoke') && parameters.get('codexLinked') !== linked) {
+    const url = new URL(location.href)
+    url.searchParams.set('codexLinked', linked)
+    setTimeout(() => location.replace(url), 0)
+  }
+  return result
+}
+
 window.closureCompanion = {
   onCursor: (callback) => { cursorHandler = callback },
   setInteractive: (enabled) => { wantsPointer = enabled },
   quit: () => invoke('quit'),
   getLinkedState: () => invoke('linked_state'),
   getRuntimeSettings: () => invoke('runtime_settings'),
-  setRuntimeSetting: async (key, enabled) => {
-    const result = await invoke('set_runtime_setting', { key, enabled })
-    const linked = String(Boolean(result.codexLinked || result.dshLinked || result.workbuddyLinked))
-    if (result.ok && !parameters.has('smoke') && parameters.get('codexLinked') !== linked) {
-      const url = new URL(location.href)
-      url.searchParams.set('codexLinked', linked)
-      setTimeout(() => location.replace(url), 0)
-    }
-    return result
-  },
+  setRuntimeSetting: (key, enabled) => invoke('set_runtime_setting', { key, enabled }).then(applyRuntimeSetting),
+  launchAgent: agent => invoke('launch_agent', { agent }).then(applyRuntimeSetting),
   nativeVoice: {
     play: (language, id, volume, request) => invoke('play_voice', { language, id, volume, request: voiceEpoch + request }),
     stop: (request) => invoke('stop_voice', { request: voiceEpoch + request }),

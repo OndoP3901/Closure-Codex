@@ -1,6 +1,6 @@
 {
   "name": "dsh-closure-codex-theme",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "可露希尔 Codex 深色主题的独立 DSH 移植：紫蓝网格、洋红细线与 CRT 扫描线",
   "type": "module",
   "main": "lib/index.js",

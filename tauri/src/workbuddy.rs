@@ -26,7 +26,35 @@ pub fn executable(local: &Path) -> PathBuf {
         .unwrap_or_else(|| local.join("Programs/WorkBuddy/WorkBuddy.exe"))
 }
 
-fn api(port: u16, path: &str) -> Option<Value> {
+pub fn runtime_executable(launcher: &Path) -> Option<PathBuf> {
+    let install = launcher.parent()?;
+    if install.join("resources/app.asar").is_file() {
+        return Some(launcher.to_path_buf());
+    }
+    let mut activation = String::new();
+    File::open(install.join("activation.record"))
+        .ok()?
+        .take(4096)
+        .read_to_string(&mut activation)
+        .ok()?;
+    let mut lines = activation.lines();
+    if lines.next()? != "WB-ACTIVATION-1" {
+        return None;
+    }
+    let version = lines.nth(2)?;
+    if version.split('.').count() != 3
+        || !version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    let runtime = install.join("versions").join(version);
+    let executable = runtime.join("WorkBuddy-app.exe");
+    (executable.is_file() && runtime.join("resources/app.asar").is_file()).then_some(executable)
+}
+
+pub(crate) fn api(port: u16, path: &str) -> Option<Value> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .proxy(None)
         .max_redirects(0)
@@ -44,7 +72,7 @@ fn api(port: u16, path: &str) -> Option<Value> {
         .ok()
 }
 
-fn socket_url(value: &Value, port: u16, prefix: &str) -> Option<Url> {
+pub(crate) fn socket_url(value: &Value, port: u16, prefix: &str) -> Option<Url> {
     let url = Url::parse(value.as_str()?).ok()?;
     let id = url.path().strip_prefix(prefix)?;
     (url.scheme() == "ws"
@@ -59,7 +87,11 @@ fn socket_url(value: &Value, port: u16, prefix: &str) -> Option<Url> {
     .then_some(url)
 }
 
-fn recorded_ports<'a>(local: &'a Path, executable: &'a Path) -> impl Iterator<Item = u16> + 'a {
+fn recorded_ports<'a>(
+    local: &'a Path,
+    launcher: &'a Path,
+    runtime: &'a Path,
+) -> impl Iterator<Item = u16> + 'a {
     [
         "ClosureCompanion/workbuddy-session.json",
         "ClosureWorkBuddyTheme/session.json",
@@ -72,17 +104,18 @@ fn recorded_ports<'a>(local: &'a Path, executable: &'a Path) -> impl Iterator<It
             .as_u64()
             .and_then(|port| u16::try_from(port).ok())
             .filter(|port| *port >= 1024)?;
-        (windows::same_path(Path::new(path), executable)
-            && windows::owns_listener(port, executable))
+        ((windows::same_path(Path::new(path), runtime)
+            || windows::same_path(Path::new(path), launcher))
+            && windows::owns_listener(port, runtime))
         .then_some(port)
     })
 }
 
-fn discover(local: &Path, executable: &Path) -> Option<(u16, Url)> {
+fn discover(local: &Path, launcher: &Path, executable: &Path) -> Option<(u16, Url)> {
     let renderer = executable
         .parent()?
         .join("resources/app.asar/renderer/index.html");
-    recorded_ports(local, executable).find_map(|port| {
+    recorded_ports(local, launcher, executable).find_map(|port| {
         let list = api(port, "list")?;
         let target = list.as_array()?.iter().find_map(|target| {
             let page = Url::parse(target["url"].as_str()?).ok()?;
@@ -98,14 +131,14 @@ fn discover(local: &Path, executable: &Path) -> Option<(u16, Url)> {
     })
 }
 
-struct Debugger {
+pub(crate) struct Debugger {
     socket: WebSocket<TcpStream>,
     id: u32,
     port: u16,
 }
 
 impl Debugger {
-    fn connect(port: u16, url: &Url, executable: &Path) -> Option<Self> {
+    pub(crate) fn connect(port: u16, url: &Url, executable: &Path) -> Option<Self> {
         if !windows::owns_listener(port, executable) {
             return None;
         }
@@ -121,7 +154,7 @@ impl Debugger {
         })
     }
 
-    fn evaluate(&mut self, expression: &str) -> Option<Value> {
+    pub(crate) fn evaluate(&mut self, expression: &str) -> Option<Value> {
         self.id += 1;
         let msg = json!({"id":self.id,"method":"Runtime.evaluate",
             "params":{"expression":expression,"returnByValue":true,"awaitPromise":true}});
@@ -162,7 +195,9 @@ pub struct WorkBuddy {
 impl WorkBuddy {
     pub fn stop(&mut self, executable: &Path) {
         if let Some(mut debugger) = self.debugger.take() {
-            if windows::owns_listener(debugger.port, executable) {
+            if runtime_executable(executable)
+                .is_some_and(|runtime| windows::owns_listener(debugger.port, &runtime))
+            {
                 debugger.evaluate("window.__closureCompanionBridge?.dispose()");
             }
         }
@@ -176,9 +211,11 @@ impl WorkBuddy {
         })
     }
 
-    fn read(&mut self, local: &Path, executable: &Path) -> Option<Host> {
+    fn read(&mut self, local: &Path, launcher: &Path) -> Option<Host> {
+        let runtime = runtime_executable(launcher)?;
+        let executable = runtime.as_path();
         if self.debugger.is_none() {
-            let (port, url) = discover(local, executable)?;
+            let (port, url) = discover(local, launcher, executable)?;
             self.debugger = Debugger::connect(port, &url, executable);
             self.runtime = runtime_asset(executable);
             self.instance.clear();
@@ -385,4 +422,38 @@ fn credits(value: Option<Value>) -> Value {
         None => ("unavailable", Value::Null),
     };
     json!({"source":"official","quota":[],"accountStatus":status,"credits":credits})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::launch::Agent;
+
+    #[test]
+    #[ignore = "requires the locally installed WorkBuddy desktop app"]
+    fn menu_launch_applies_the_theme_setting_and_connects_workbuddy() {
+        let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+        let launcher = executable(&local);
+        let runtime = runtime_executable(&launcher).unwrap();
+        let mut adapter = WorkBuddy::default();
+
+        for theme_enabled in [true, false, true] {
+            Agent::WorkBuddy.open(&local, theme_enabled).unwrap();
+            let (port, url) = discover(&local, &launcher, &runtime).unwrap();
+            let mut debugger = Debugger::connect(port, &url, &runtime).unwrap();
+            assert_eq!(
+                debugger.evaluate("document.documentElement.getAttribute('data-closure-workbuddy-theme') === 'on'"),
+                Some(json!(theme_enabled))
+            );
+            let host = adapter.tick(&local, &launcher);
+            assert!(host.connected, "WorkBuddy bridge did not connect");
+            assert!(
+                matches!(
+                    host.account["accountStatus"].as_str(),
+                    Some("ready" | "signed-out")
+                ),
+                "WorkBuddy account service did not finish"
+            );
+        }
+    }
 }

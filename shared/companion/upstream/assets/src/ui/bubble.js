@@ -24,6 +24,10 @@ export function quotaLines(state) {
       } else if (account.host === 'codex') {
         const values = quotaLines({ closureCompanion: { ...account, tokenUsage: null, accounts: undefined } })
         return values.length ? values.map(line => prefix + ' ' + line) : ['Codex：账户余额暂不可用']
+      } else if (account.host === 'antigravity') {
+        if (account.accountStatus === 'disconnected') return ['Antigravity：等待额度连接']
+        const values = quotaLines({ closureCompanion: { quota: account.quota } })
+        return values.length ? values.map(line => prefix + ' ' + line) : ['Antigravity：模型额度暂不可用']
       }
       const message = { 'signed-out': '未登录官方账号', unavailable: '官方余额暂不可用', disconnected: '等待连接', checking: '正在查询余额' }[account.accountStatus] || '等待官方余额'
       return [`${prefix}：${message}`]

@@ -26,6 +26,7 @@ export function createPanel(deps) {
 
   // ————————————————————— 设置面板 —————————————————————
   var panel = null
+  let runtimePoll = 0
   function panelIsOpen() { return !!(panel && panel.style.display === 'block') }
 
   function buildPanel() {
@@ -52,43 +53,57 @@ export function createPanel(deps) {
       return el
     }
 
+    function actionButton(label, handler) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.textContent = label
+      button.style.cssText = 'padding:5px 8px;border-radius:7px;border:1px solid rgba(255,255,255,.18);' +
+        'background:rgba(255,255,255,.06);color:#dfe4f0;font:inherit;cursor:pointer'
+      button.addEventListener('click', handler)
+      return button
+    }
+
+    const agents = [['codex', 'Codex'], ['dsh', 'DSH'], ['workbuddy', 'WorkBuddy'], ['antigravity', 'Antigravity']]
     const runtimeControls = {}
+    const agentRows = new Map()
+    let busy = false
     const runtimeStatus = document.createElement('div')
     runtimeStatus.setAttribute('role', 'status')
     runtimeStatus.style.cssText = 'color:#ffb8c9;max-width:260px'
     function disableRuntime(disabled) {
+      busy = disabled
       for (const input of Object.values(runtimeControls)) input.disabled = disabled
+      for (const { button } of agentRows.values()) if (button) button.disabled = disabled
     }
-    function syncRuntime(value) {
+    function syncRuntime(value, announce = true) {
       for (const [key, input] of Object.entries(runtimeControls)) input.checked = value[key] === true
-      const states = Object.entries(value.integrations || {}).filter(([host]) => value[host === 'workbuddy' ? 'workbuddyLinked' : host + 'Linked'])
-        .map(([host, entry]) => {
-          const name = { codex: 'Codex', dsh: 'DSH', workbuddy: 'WorkBuddy' }[host]
-          return name + (entry.status === 'connected' ? '：已连接' : host === 'workbuddy' ? '：等待连接' : '：等待宿主插件连接')
-        })
-      runtimeStatus.textContent = [value.startupError, ...states].filter(Boolean).join('\n')
-      runtimeStatus.style.whiteSpace = 'pre-line'
+      for (const [agent, { name, status }] of agentRows) {
+        const connected = value.integrations?.[agent]?.status === 'connected'
+        status.textContent = name + '：' + (connected ? '已连接' : '等待连接')
+      }
+      if (announce) runtimeStatus.textContent = value.startupError || ''
     }
-    async function refreshRuntime() {
-      if (!deps.getRuntimeSettings) return
-      disableRuntime(true)
+    async function refreshRuntime(passive = false) {
+      if (!deps.getRuntimeSettings || busy) return
+      if (!passive) disableRuntime(true)
       try {
         const value = await deps.getRuntimeSettings()
         if (!value) throw new Error('No settings')
-        syncRuntime(value)
+        if (!passive || !busy) syncRuntime(value, !passive)
       } catch {
-        runtimeStatus.textContent = '设置未读取，请重新打开菜单。'
+        if (!passive) runtimeStatus.textContent = '设置未读取，请重新打开菜单。'
       } finally {
-        disableRuntime(false)
+        if (!passive) disableRuntime(false)
         positionPanel()
       }
     }
     if (deps.setRuntimeSetting) {
-      for (const [key, label] of [['codexLinked', 'Codex 联动'], ['dshLinked', 'DSH 联动'], ['workbuddyLinked', 'WorkBuddy 联动'], ['showOutsideCodex', '在桌面和其他软件中显示'], ['startAtLogin', '开机自启']]) {
+      const toggles = agents.map(([agent, name]) => [agent + 'Linked', name + ' 联动'])
+      for (const [key, label] of [['themeEnabled', '启用主题'], ...toggles, ['showOutsideCodex', '在桌面和其他软件中显示'], ['startAtLogin', '开机自启']]) {
         const settingRow = row(label)
         const checkbox = document.createElement('input')
         checkbox.type = 'checkbox'
-        checkbox.checked = key === 'codexLinked' ? !deps.standalone : key === 'showOutsideCodex'
+        checkbox.checked = key === 'codexLinked' ? !deps.standalone : key === 'showOutsideCodex' || key === 'themeEnabled'
         checkbox.setAttribute('aria-label', label)
         runtimeControls[key] = checkbox
         checkbox.addEventListener('change', async () => {
@@ -109,7 +124,34 @@ export function createPanel(deps) {
         })
         settingRow.appendChild(checkbox)
       }
+      for (const [agent, name] of agents) {
+        const statusRow = row(name + '：等待连接')
+        const status = statusRow.firstElementChild
+        status.dataset.agentStatus = agent
+        status.style.color = '#ffb8c9'
+        let button
+        if (deps.launchAgent) {
+          button = actionButton('启动', () => launchAgent(agent, name))
+          button.setAttribute('aria-label', '启动 ' + name)
+          statusRow.appendChild(button)
+        }
+        agentRows.set(agent, { name, status, button })
+      }
       panel.appendChild(runtimeStatus)
+    }
+
+    async function launchAgent(agent, name) {
+      disableRuntime(true)
+      runtimeStatus.textContent = '正在启动 ' + name + '…'
+      positionPanel()
+      try {
+        syncRuntime(await deps.launchAgent(agent))
+      } catch (error) {
+        runtimeStatus.textContent = typeof error === 'string' ? error : error?.message || (name + ' 操作失败。')
+      } finally {
+        disableRuntime(false)
+        positionPanel()
+      }
     }
 
     // 镜像
@@ -423,12 +465,9 @@ export function createPanel(deps) {
     var actions = document.createElement('div')
     actions.style.cssText = 'display:flex;gap:8px;margin-top:9px'
     function action(label, fn) {
-      var b = document.createElement('button')
-      b.textContent = label
-      b.style.cssText = 'flex:1;padding:5px 8px;border-radius:7px;border:1px solid rgba(255,255,255,.18);' +
-        'background:rgba(255,255,255,.06);color:#dfe4f0;font:inherit;cursor:pointer'
-      b.addEventListener('click', fn)
-      actions.appendChild(b)
+      const button = actionButton(label, fn)
+      button.style.flex = '1'
+      actions.appendChild(button)
     }
     action('重置位置', function () { resetPosition() })
     action('完成', function () { closePanel() })
@@ -459,6 +498,9 @@ export function createPanel(deps) {
       panelApi.syncBubbleControls()
       panelApi.syncMirrorButtons()
       panelApi.refreshRuntime()
+      if (deps.getRuntimeSettings && !runtimePoll) {
+        runtimePoll = setInterval(() => panelApi?.refreshRuntime(true), 2000)
+      }
     }
     panel.style.display = 'block'
     if (panelApi.voiceQueues.menu.open) panelApi.voiceQueues.refresh()
@@ -480,6 +522,8 @@ export function createPanel(deps) {
   }
 
   function closePanel() {
+    clearInterval(runtimePoll)
+    runtimePoll = 0
     if (panel) panel.style.display = 'none'
     deps.stopVoicePreview()
   }
@@ -489,6 +533,8 @@ export function createPanel(deps) {
   }
 
   function dispose() {
+    clearInterval(runtimePoll)
+    runtimePoll = 0
     if (panel && panel.parentNode) panel.parentNode.removeChild(panel)
     panel = null
     panelApi = null

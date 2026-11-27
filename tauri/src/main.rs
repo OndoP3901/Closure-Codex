@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod antigravity;
 mod audio;
 mod codex;
 mod cursor;
+mod launch;
 mod linked;
 mod settings;
 #[cfg(test)]
@@ -95,6 +97,34 @@ fn set_runtime_setting(
 #[tauri::command]
 fn linked_state(runtime: State<'_, Runtime>, hub: State<'_, Hub>) -> Value {
     hub.snapshot(runtime.get())
+}
+
+#[derive(Default)]
+struct LaunchLock(tokio::sync::Mutex<()>);
+
+#[tauri::command]
+async fn launch_agent(agent: launch::Agent, app: AppHandle) -> Result<Value, String> {
+    let lock = app.state::<LaunchLock>();
+    let _guard = lock
+        .0
+        .try_lock()
+        .map_err(|_| "正在启动联动应用，请稍候。")?;
+    let runtime = app.state::<Runtime>();
+    let theme_enabled = runtime.get().theme_enabled;
+    if !runtime.test {
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .ok_or("无法定位应用安装目录。")?;
+        tauri::async_runtime::spawn_blocking(move || agent.open(&local, theme_enabled))
+            .await
+            .map_err(|_| "启动应用时发生错误。")??;
+    }
+    runtime
+        .set(agent.setting(), true)
+        .map_err(|_| "应用已启动，联动设置未保存。")?;
+    let mut result = settings_value(&runtime, &app.state::<Hub>());
+    result["ok"] = json!(true);
+    Ok(result)
 }
 
 #[cfg(windows)]
@@ -308,6 +338,39 @@ fn start_runtime(app: &AppHandle, local: &Path) {
             thread::sleep(Duration::from_secs(1));
         }
     });
+    let antigravity_account = std::sync::Arc::new(Mutex::new(Value::Null));
+    let antigravity_quota = antigravity_account.clone();
+    let antigravity_app = app.clone();
+    let antigravity_local = local.to_path_buf();
+    if let Some(roaming) = std::env::var_os("APPDATA").map(PathBuf::from) {
+        thread::spawn(move || {
+            let mut next = std::time::Instant::now();
+            loop {
+                let enabled = antigravity_app.state::<Runtime>().get().antigravity_linked;
+                if !enabled {
+                    *antigravity_quota.lock().unwrap() = Value::Null;
+                    next = std::time::Instant::now();
+                } else if std::time::Instant::now() >= next {
+                    let account = antigravity::account(&antigravity_local, &roaming);
+                    next = std::time::Instant::now()
+                        + Duration::from_secs(if account.is_some() { 15 } else { 5 });
+                    *antigravity_quota.lock().unwrap() = account.unwrap_or_default();
+                }
+                thread::sleep(Duration::from_secs(1));
+            }
+        });
+    }
+    let antigravity_app = app.clone();
+    let antigravity_local = local.to_path_buf();
+    thread::spawn(move || {
+        let mut bridge = antigravity::Bridge::new(&antigravity_local);
+        loop {
+            let enabled = antigravity_app.state::<Runtime>().get().antigravity_linked;
+            let account = antigravity_account.lock().unwrap().clone();
+            bridge.tick(enabled, &antigravity_app.state::<Hub>(), &account);
+            thread::sleep(Duration::from_millis(500));
+        }
+    });
     let window = app.get_webview_window("pet").unwrap();
     let local = local.to_path_buf();
     thread::spawn(move || {
@@ -362,6 +425,12 @@ fn main() {
     let local = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
+    if let [flag, event] = args.as_slice() {
+        if flag == "--antigravity-hook" {
+            antigravity::hook(&local, event.to_str().unwrap_or_default());
+            return;
+        }
+    }
     if !has("--smoke") && !has("--worker") {
         let result = windows::supervise(&args);
         if matches!(result, Ok(1)) {
@@ -390,6 +459,7 @@ fn main() {
         .manage(Cursor::default())
         .manage(Hub::default())
         .manage(Ready::default())
+        .manage(LaunchLock::default())
         .manage(options)
         .setup(move |app| {
             let options = app.state::<Options>();
@@ -420,6 +490,7 @@ fn main() {
             runtime_settings,
             set_runtime_setting,
             linked_state,
+            launch_agent,
             audio::play_voice,
             audio::stop_voice,
             audio::voice_volume,

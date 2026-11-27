@@ -9,8 +9,9 @@ use serde_json::{json, Map, Value};
 
 use crate::settings::{read_json, write_json, Settings};
 
-pub const HOSTS: [&str; 3] = ["codex", "dsh", "workbuddy"];
-const NAMES: [&str; 3] = ["Codex", "DSH", "WorkBuddy"];
+pub const HOSTS: [&str; 4] = ["codex", "dsh", "workbuddy", "antigravity"];
+const NAMES: [&str; HOSTS.len()] = ["Codex", "DSH", "WorkBuddy", "Antigravity"];
+pub const ANTIGRAVITY: usize = 3;
 const SIGNALS: [&str; 6] = [
     "/turnStartSeq",
     "/turnEnd/seq",
@@ -32,6 +33,7 @@ pub fn enabled(settings: Settings, host: usize) -> bool {
         settings.codex_linked,
         settings.dsh_linked,
         settings.workbuddy_linked,
+        settings.antigravity_linked,
     ][host]
 }
 
@@ -48,8 +50,8 @@ pub struct Hub(Mutex<Tracker>);
 
 #[derive(Default)]
 struct Tracker {
-    hosts: [Host; 3],
-    previous: [HashMap<String, [u64; 6]>; 3],
+    hosts: [Host; HOSTS.len()],
+    previous: [HashMap<String, [u64; 6]>; HOSTS.len()],
     totals: [u64; 6],
     focus: Option<String>,
     revision: u64,

@@ -69,10 +69,16 @@ async function closeTarget(pkg,target) {
       Start-Sleep -Milliseconds 250
     }
     $p=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $expected.pid)
-    if($p -and $p.ExecutablePath -eq $env:CLOSURE_THEME_EXE -and $p.CreationDate.ToString('o') -eq $expected.created) { Stop-Process -Id $expected.pid -ErrorAction Stop }
+    if($p -and $p.ExecutablePath -eq $env:CLOSURE_THEME_EXE -and $p.CreationDate.ToString('o') -eq $expected.created) { throw 'Codex is still open. Save your work and quit Codex before trying again.' }
     $true
   `,{CLOSURE_THEME_EXE:pkg.executable,CLOSURE_THEME_TARGET:JSON.stringify(target)})
   await delay(500)
+}
+async function openStoreCodex(pkg) {
+  await powershellJson(`
+    Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList ('shell:AppsFolder\\'+$env:CLOSURE_THEME_APP)
+    $true
+  `,{CLOSURE_THEME_APP:pkg.family+'!'+pkg.appId})
 }
 async function choosePort() {
   for(let port=19338;port<19358;port++) {
@@ -129,44 +135,6 @@ async function stopProjectInjectors(browser) {
     } | ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
     $true
   `,{CLOSURE_INJECTOR_ENTRY:path.join(__dirname,'attach.cjs'),CLOSURE_INJECTOR_BROWSER:browser})
-}
-async function createShortcuts(pkg) {
-  return powershellJson(`
-    $shell=New-Object -ComObject WScript.Shell
-    $links=@()
-    foreach($folder in @([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'))) {
-      if(!$folder -or !(Test-Path -LiteralPath $folder -PathType Container)) { continue }
-      $destination=Join-Path $folder $env:CLOSURE_LINK_NAME
-      try {
-        $shortcut=$shell.CreateShortcut($destination)
-        $shortcut.TargetPath=Join-Path $env:SystemRoot 'System32/wscript.exe'
-        $shortcut.Arguments='//Nologo "'+$env:CLOSURE_LINK_ENTRY+'"'
-        $shortcut.WorkingDirectory=Split-Path -Parent $env:CLOSURE_LINK_ENTRY
-        $shortcut.IconLocation=$env:CLOSURE_THEME_EXE+',0'
-        $shortcut.Description=$env:CLOSURE_LINK_DESCRIPTION
-        $shortcut.Save()
-        $links+=$destination
-      } catch { }
-    }
-    @($links)
-  `,{CLOSURE_LINK_ENTRY:path.join(project,'Enable-Codex-Theme.vbs'),CLOSURE_LINK_NAME:'Codex - 可露希尔深色主题.lnk',
-    CLOSURE_THEME_EXE:pkg.executable,CLOSURE_LINK_DESCRIPTION:'启用可露希尔深色主题，保留原账号与聊天记录'})
-}
-async function removeShortcuts() {
-  await powershellJson(`
-    $shell=New-Object -ComObject WScript.Shell
-    foreach($folder in @([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'))) {
-      if(!$folder) { continue }
-      $destination=Join-Path $folder $env:CLOSURE_LINK_NAME
-      if(Test-Path -LiteralPath $destination -PathType Leaf) {
-        $shortcut=$shell.CreateShortcut($destination)
-        $hiddenTarget=Join-Path $env:SystemRoot 'System32/wscript.exe'
-        if($shortcut.TargetPath -eq $env:CLOSURE_LEGACY_LINK_ENTRY -or
-          ($shortcut.TargetPath -eq $hiddenTarget -and $shortcut.Arguments -eq ('//Nologo "'+$env:CLOSURE_LINK_ENTRY+'"'))) { Remove-Item -LiteralPath $destination }
-      }
-    }
-    $true
-  `,{CLOSURE_LINK_ENTRY:path.join(project,'Enable-Codex-Theme.vbs'),CLOSURE_LEGACY_LINK_ENTRY:path.join(project,'Enable-Codex-Theme.cmd'),CLOSURE_LINK_NAME:'Codex - 可露希尔深色主题.lnk'})
 }
 async function waitInjection(stateFile,pid) {
   let state
@@ -230,8 +198,8 @@ async function restoreStartup({api,pkg,profile,codexHome,port}) {
   } catch(error) {console.error('恢复普通 Codex 启动失败：'+error.message)}
 }
 async function run(options,services={}) {
-  const api={findPackage,getProcesses,startPackaged,closeTarget,choosePort,version,waitBrowser,verifyOwner,buildPayload,stopInjector,
-    stopProjectInjectors,createShortcuts,removeShortcuts,...services}
+  const api={findPackage,getProcesses,startPackaged,openStoreCodex,closeTarget,choosePort,version,waitBrowser,verifyOwner,buildPayload,stopInjector,
+    stopProjectInjectors,...services}
   const root=path.resolve(options['state-root'] || path.join(process.env.LOCALAPPDATA,'ClosureCodexTheme'))
   const configFile=path.join(root,'config.json'), sessionFile=path.join(root,'session.json')
   const config=await readJson(configFile), previous=await readJson(sessionFile)
@@ -252,7 +220,6 @@ async function run(options,services={}) {
       await api.closeTarget(pkg,current)
       await api.startPackaged(pkg,config.profile,config.codexHome,null)
     }
-    if(!options['no-shortcuts'])await api.removeShortcuts()
     await writeJson(configFile,{...config,enabled:false})
     await writeJson(sessionFile,{...previous,running:false})
     return {ok:true,message:'已恢复原外观与普通启动。原账号、聊天记录和外观设置均保留。'}
@@ -260,6 +227,15 @@ async function run(options,services={}) {
   const codexHome=config?.codexHome || process.env.CODEX_HOME || path.join(process.env.USERPROFILE,'.codex')
   // Validate bundled assets before touching an ordinary running app.
   await api.buildPayload()
+  if(options['from-menu'] && !config?.profile && !target && !processes.some(item=>!item.headless)) {
+    await api.openStoreCodex(pkg)
+    for(let attempt=0;attempt<40;attempt++){
+      await delay(250)
+      processes=await api.getProcesses(pkg)
+      target=selectTarget(processes,config)
+      if(target)break
+    }
+  }
   let connection, newInjector, session
   try {
     connection=await prepareConnection({api,pkg,config,codexHome,processes})
@@ -279,10 +255,9 @@ async function run(options,services={}) {
     await writeJson(sessionFile,session)
     const state=await waitInjection(injectorState,newInjector.pid)
     const ready=state.targets.some(item=>item.shellReady)
-    const links=options['no-shortcuts'] ? [] : await api.createShortcuts(pkg)
-    await writeJson(configFile,{enabled:true,profile,codexHome,project,version:pkg.version,links})
-    return {ok:true,message:ready ? '深色主题已启用，配色、字体、菜单栏与 CRT 已一起生效，无需手动导入。'+(options['no-shortcuts'] ? '' : links.length ? '以后使用“Codex - 可露希尔深色主题”快捷方式启动。' : '未能创建快捷方式，以后双击 Enable-Codex-Theme.vbs 启动。') :
-      '主题启动入口已准备好；Codex 主界面出现后自动应用配色、字体与 CRT，无需手动导入。',shellReady:ready,restarted,startup,port,profile,links}
+    await writeJson(configFile,{enabled:true,profile,codexHome,project,version:pkg.version})
+    return {ok:true,message:ready ? '深色主题已启用。' : 'Codex 主界面出现后会自动应用主题。',
+      shellReady:ready,restarted,startup,port,profile}
   } catch(error) {
     if(session)await api.stopInjector(session).catch(()=>{})
     if(connection?.started)await restoreStartup({api,pkg,profile:connection.profile,codexHome,port:connection.port})
@@ -291,7 +266,7 @@ async function run(options,services={}) {
   }
 }
 async function main() {
-  const {values}=parseArgs({options:{mode:{type:'string',default:'enable'},'state-root':{type:'string'},result:{type:'string'},'no-shortcuts':{type:'boolean',default:false}}})
+  const {values}=parseArgs({options:{mode:{type:'string',default:'enable'},'state-root':{type:'string'},result:{type:'string'},'from-menu':{type:'boolean',default:false}}})
   if(!['enable','disable','status','inspect'].includes(values.mode))throw new Error('Invalid theme action')
   const root=path.resolve(values['state-root'] || path.join(process.env.LOCALAPPDATA,'ClosureCodexTheme'))
   await fs.mkdir(root,{recursive:true})

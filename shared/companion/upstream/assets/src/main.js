@@ -461,6 +461,7 @@ import { createState } from './io/state.js'
   panelUi = createPanel({
     standalone, getRuntimeSettings: window.closureCompanion?.getRuntimeSettings,
     setRuntimeSetting: window.closureCompanion?.setRuntimeSetting,
+    launchAgent: window.closureCompanion?.launchAgent,
     quit: window.closureCompanion?.quit,
     settings: settings, saveSettings: saveSettings, resolveFlip: resolveFlip,
     layout: layout, repositionForAnchor: repositionForAnchor, applyOpacity: applyOpacity,
