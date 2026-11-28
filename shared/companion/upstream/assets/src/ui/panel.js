@@ -69,7 +69,7 @@ export function createPanel(deps) {
     let busy = false
     const runtimeStatus = document.createElement('div')
     runtimeStatus.setAttribute('role', 'status')
-    runtimeStatus.style.cssText = 'color:#ffb8c9;max-width:260px'
+    runtimeStatus.style.cssText = 'color:#ffb8c9;max-width:260px;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text'
     function disableRuntime(disabled) {
       busy = disabled
       for (const input of Object.values(runtimeControls)) input.disabled = disabled
@@ -428,7 +428,7 @@ export function createPanel(deps) {
     previews.addEventListener('toggle', positionPanel)
     panel.appendChild(previews)
 
-    if (location.protocol === 'closure-pet:' && !deps.standalone) {
+    if (deps.getRuntimeSettings || !deps.standalone) {
       const notifications = document.createElement('details')
       notifications.style.cssText = previews.style.cssText
       const heading = document.createElement('summary')

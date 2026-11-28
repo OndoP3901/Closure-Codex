@@ -4,6 +4,7 @@ mod antigravity;
 mod audio;
 mod codex;
 mod cursor;
+mod install;
 mod launch;
 mod linked;
 mod settings;
@@ -23,6 +24,7 @@ use std::{
 };
 
 use cursor::{Cursor, Sample};
+use install::{Installs, Product};
 use linked::{Host, Hub};
 use serde_json::{json, Value};
 use settings::Runtime;
@@ -39,6 +41,53 @@ struct Options {
 
 #[derive(Default)]
 struct Ready(AtomicBool);
+
+#[derive(Default)]
+struct TrayReveal(AtomicBool);
+
+fn reveal_pet(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("pet") else {
+        return;
+    };
+    app.state::<TrayReveal>().0.store(true, Ordering::Release);
+    if let Ok(Some(monitor)) = window
+        .cursor_position()
+        .and_then(|point| window.monitor_from_point(point.x, point.y))
+    {
+        let _ = window.set_position(monitor.work_area().position);
+        let _ = window.set_size(monitor.work_area().size);
+    }
+    if app.state::<Ready>().0.load(Ordering::Acquire) {
+        let _ = window.show();
+    }
+}
+
+fn tray_action(app: &AppHandle, id: &str) {
+    match id {
+        "show-pet" => reveal_pet(app),
+        "quit-pet" => app.exit(0),
+        _ => {}
+    }
+}
+
+fn create_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::TrayIconBuilder,
+    };
+    let show = MenuItem::with_id(app, "show-pet", "显示桌宠", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit-pet", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::with_id("pet")
+        .tooltip("可露希尔 · 桌宠")
+        .menu(&menu)
+        .on_menu_event(|app, event| tray_action(app, event.id.as_ref()));
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
 
 #[tauri::command]
 fn frontend_ready(
@@ -112,12 +161,16 @@ async fn launch_agent(agent: launch::Agent, app: AppHandle) -> Result<Value, Str
     let runtime = app.state::<Runtime>();
     let theme_enabled = runtime.get().theme_enabled;
     if !runtime.test {
-        let local = std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .ok_or("无法定位应用安装目录。")?;
-        tauri::async_runtime::spawn_blocking(move || agent.open(&local, theme_enabled))
-            .await
-            .map_err(|_| "启动应用时发生错误。")??;
+        let launcher = app.clone();
+        let owner = app
+            .get_webview_window("pet")
+            .and_then(|w| w.hwnd().ok())
+            .map_or(0, |hwnd| hwnd.0 as isize);
+        tauri::async_runtime::spawn_blocking(move || {
+            agent.open(&launcher.state::<Installs>(), theme_enabled, owner)
+        })
+        .await
+        .map_err(|_| "启动应用时发生错误。")??;
     }
     runtime
         .set(agent.setting(), true)
@@ -159,8 +212,22 @@ fn smoke_result(app: AppHandle, options: State<'_, Options>, message: Option<Str
             eprintln!("{message}");
             app.exit(1);
         } else {
+            let window = app.get_webview_window("pet").unwrap();
+            if app.tray_by_id("pet").is_none() || window.hide().is_err() {
+                eprintln!("Could not prepare hidden pet for the tray test");
+                app.exit(1);
+                return;
+            }
+            tray_action(&app, "show-pet");
+            if !window.is_visible().unwrap_or(false)
+                || !app.state::<TrayReveal>().0.load(Ordering::Acquire)
+            {
+                eprintln!("Tray did not reveal the hidden pet");
+                app.exit(1);
+                return;
+            }
             println!("Tauri companion smoke passed");
-            app.exit(0);
+            tray_action(&app, "quit-pet");
         }
     }
 }
@@ -261,7 +328,6 @@ fn create_window(app: &AppHandle, options: &Options) -> tauri::Result<()> {
 }
 
 fn start_runtime(app: &AppHandle, local: &Path) {
-    let executable = workbuddy::executable(local);
     let codex_home = std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::home_dir().unwrap_or_default().join(".codex"));
@@ -320,21 +386,26 @@ fn start_runtime(app: &AppHandle, local: &Path) {
     });
     let work_app = app.clone();
     let work_local = local.to_path_buf();
-    let work_executable = executable.clone();
     thread::spawn(move || {
         let mut worker = workbuddy::WorkBuddy::default();
-        let mut enabled = false;
+        let mut previous: Option<PathBuf> = None;
         loop {
             let needed = work_app.state::<Runtime>().get().workbuddy_linked;
-            if needed {
+            let launcher = needed
+                .then(|| work_app.state::<Installs>().get(Product::WorkBuddy))
+                .flatten();
+            if previous != launcher {
+                if let Some(old) = previous.take() {
+                    worker.stop(&old);
+                    work_app.state::<Hub>().set(2, Host::default());
+                }
+                previous = launcher;
+            }
+            if let Some(exe) = &previous {
                 work_app
                     .state::<Hub>()
-                    .set(2, worker.tick(&work_local, &work_executable));
-            } else if enabled {
-                worker.stop(&work_executable);
-                work_app.state::<Hub>().set(2, Host::default());
+                    .set(2, worker.tick(&work_local, exe));
             }
-            enabled = needed;
             thread::sleep(Duration::from_secs(1));
         }
     });
@@ -372,14 +443,22 @@ fn start_runtime(app: &AppHandle, local: &Path) {
         }
     });
     let window = app.get_webview_window("pet").unwrap();
-    let local = local.to_path_buf();
     thread::spawn(move || {
         let mut last = None;
         while let Ok(visible) = window.is_visible() {
             let ready = window.state::<Ready>().0.load(Ordering::Acquire);
             let settings = window.state::<Runtime>().get();
             if ready {
-                let target = if settings.show_outside_codex {
+                let reveal = window.state::<TrayReveal>();
+                let foreground = if settings.show_outside_codex {
+                    None
+                } else {
+                    windows::foreground_bounds(settings, &window.state::<Installs>())
+                };
+                if settings.show_outside_codex || foreground.is_some() {
+                    reveal.0.store(false, Ordering::Release);
+                }
+                let target = if settings.show_outside_codex || reveal.0.load(Ordering::Acquire) {
                     window.current_monitor().ok().flatten().map(|monitor| {
                         let area = monitor.work_area();
                         (
@@ -390,7 +469,7 @@ fn start_runtime(app: &AppHandle, local: &Path) {
                         )
                     })
                 } else {
-                    windows::foreground_bounds(settings, &local, &executable)
+                    foreground
                 };
                 if let Some((x, y, width, height)) = target {
                     if target != last {
@@ -453,12 +532,16 @@ fn main() {
     };
     let mut builder = tauri::Builder::default();
     if !options.smoke {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|_, _, _| {}));
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            reveal_pet(app)
+        }));
     }
     let app = builder
         .manage(Cursor::default())
         .manage(Hub::default())
         .manage(Ready::default())
+        .manage(TrayReveal::default())
+        .manage(Installs::new(&local))
         .manage(LaunchLock::default())
         .manage(options)
         .setup(move |app| {
@@ -477,6 +560,7 @@ fn main() {
             };
             app.manage(audio::Audio::start(app.handle().clone()));
             create_window(app.handle(), &options)?;
+            create_tray(app.handle())?;
             if !options.smoke {
                 start_runtime(app.handle(), &local);
             }

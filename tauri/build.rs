@@ -49,6 +49,12 @@ fn stage_frontend() -> io::Result<()> {
         &source.join("upstream/assets"),
         &target.join("dsh-closure/assets"),
     )?;
+    for notice in ["LICENSE", "NOTICE.md"] {
+        copy_file(
+            &source.join("upstream").join(notice),
+            &target.join("dsh-closure").join(notice),
+        )?;
+    }
     fs::write(target.join("dsh-closure/config"), "{}")?;
     Ok(())
 }

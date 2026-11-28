@@ -2,25 +2,45 @@ const { execFile } = require('node:child_process')
 const { promisify } = require('node:util')
 const run = promisify(execFile)
 
-async function powershellJson(source, env = {}) {
-  // Windows PowerShell 5.1 emits no JSON for a null/empty pipeline result.
-  const script = `$ErrorActionPreference='Stop'; $result = & { ${source} }; if ($null -eq $result) { $json = 'null' } else { $json = ConvertTo-Json -InputObject $result -Depth 6 -Compress }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))`
-  const { stdout } = await run('powershell.exe', ['-NoLogo','-NoProfile','-NonInteractive','-Command',script],
-    { windowsHide:true, timeout:20000, env:{...process.env,...env} })
-  return JSON.parse(Buffer.from(stdout.trim(),'base64').toString('utf8'))
+async function powershellJson(source, env = {}, step = '运行 Windows PowerShell') {
+  const script = `
+    $ErrorActionPreference = 'Stop'
+    try {
+      $value = & { ${source} }
+      if ($null -eq $value) { $value = $null }
+      $reply = @{ ok = $true; value = $value }
+    } catch {
+      $reply = @{ ok = $false; message = $_.Exception.Message }
+    }
+    $json = ConvertTo-Json -InputObject $reply -Depth 8 -Compress
+    [Console]::WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json)))
+  `
+  let reply
+  try {
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    const { stdout } = await run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+      { windowsHide: true, timeout: 20000, env: { ...process.env, ...env } })
+    reply = JSON.parse(Buffer.from(stdout.trim(), 'base64').toString('utf8'))
+  } catch (error) {
+    const reason = error.killed ? '等待 PowerShell 超时' : error.code === 'ENOENT' ? '找不到 Windows PowerShell' :
+      error.code ? 'PowerShell 退出代码 ' + error.code : 'PowerShell 未返回有效结果'
+    throw new Error(step + '失败：' + reason)
+  }
+  if (!reply.ok) throw new Error(step + '失败：' + reply.message.replace(/\s+/g, ' ').trim())
+  return reply.value
 }
 
 async function findPackage() {
   return powershellJson(`
     $p = Get-AppxPackage -Name OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1
-    if (!$p) { throw 'Registered Codex package not found' }
+    if (!$p) { throw '未找到当前用户注册的 Microsoft Store 版 Codex。' }
     $manifest=Get-AppxPackageManifest -Package $p.PackageFullName
     $app=@($manifest.Package.Applications.Application) | Where-Object { $_.Id -eq 'App' } | Select-Object -First 1
     if(!$app) { $app=@($manifest.Package.Applications.Application) | Select-Object -First 1 }
     $executable=Join-Path $p.InstallLocation ([string]$app.Executable)
-    if(!(Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'Registered Codex executable not found' }
+    if(!(Test-Path -LiteralPath $executable -PathType Leaf)) { throw '安装清单中的 Codex 程序不存在。' }
     [pscustomobject]@{ executable=$executable; version=[string]$p.Version; family=$p.PackageFamilyName; appId=[string]$app.Id }
-  `)
+  `, {}, '识别 Codex 安装包')
 }
 
 function hasProfile(command, profile) {
@@ -35,7 +55,7 @@ async function verifyOwner(port, executable, profile) {
       $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.OwningProcess)
       [pscustomobject]@{ address=$_.LocalAddress; pid=$_.OwningProcess; executable=$p.ExecutablePath; command=$p.CommandLine }
     })
-  `)
+  `, {}, '确认 Codex 主题端口')
   const owners = [result].flat().filter(Boolean)
   if(!owners.length || owners.some(owner => !['127.0.0.1','::1'].includes(owner.address) ||
     owner.executable?.toLowerCase() !== executable.toLowerCase() || !hasProfile(owner.command,profile))) {

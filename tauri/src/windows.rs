@@ -29,7 +29,10 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::settings::Settings;
+use crate::{
+    install::{Installs, Product},
+    settings::Settings,
+};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const STARTUP_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -148,10 +151,6 @@ pub fn codex_window(path: &Path) -> bool {
         && (path.ends_with("\\app\\codex.exe") || path.ends_with("\\app\\chatgpt.exe"))
 }
 
-pub fn dsh_executable(local: &Path) -> PathBuf {
-    local.join("Programs/DeepSeek Harness/DeepSeek Harness.exe")
-}
-
 pub fn show_application(path: &Path) -> bool {
     let mut target = (path, std::ptr::null_mut::<std::ffi::c_void>());
     unsafe extern "system" fn find(window: HWND, data: LPARAM) -> i32 {
@@ -188,11 +187,45 @@ pub fn show_application(path: &Path) -> bool {
     true
 }
 
-pub fn foreground_bounds(
-    settings: Settings,
-    local: &Path,
-    workbuddy: &Path,
-) -> Option<(i32, i32, u32, u32)> {
+pub fn choose_launcher(owner: isize, filename: &str) -> Result<PathBuf, String> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        CommDlgExtendedError, GetOpenFileNameW, OFN_DONTADDTORECENT, OFN_EXPLORER,
+        OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    let filter = wide(&format!("{filename}\0{filename}\0"));
+    let title = wide(&format!("请选择安装目录中的 {filename}"));
+    let mut file = vec![0_u16; 32768];
+    let mut dialog = OPENFILENAMEW {
+        lStructSize: size_of::<OPENFILENAMEW>() as u32,
+        hwndOwner: owner as HWND,
+        lpstrFilter: filter.as_ptr(),
+        lpstrTitle: title.as_ptr(),
+        lpstrFile: file.as_mut_ptr(),
+        nMaxFile: file.len() as u32,
+        Flags: OFN_EXPLORER
+            | OFN_FILEMUSTEXIST
+            | OFN_PATHMUSTEXIST
+            | OFN_NOCHANGEDIR
+            | OFN_DONTADDTORECENT,
+        ..Default::default()
+    };
+    if unsafe { GetOpenFileNameW(&mut dialog) } == 0 {
+        let error = unsafe { CommDlgExtendedError() };
+        return Err(if error == 0 {
+            "已取消选择应用。".into()
+        } else {
+            format!("无法打开文件选择窗口（Windows 错误 {error}）。")
+        });
+    }
+    let end = file
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(file.len());
+    Ok(std::ffi::OsString::from_wide(&file[..end]).into())
+}
+
+pub fn foreground_bounds(settings: Settings, installs: &Installs) -> Option<(i32, i32, u32, u32)> {
     unsafe {
         let window = GetForegroundWindow();
         if window.is_null()
@@ -212,12 +245,17 @@ pub fn foreground_bounds(
         GetWindowThreadProcessId(window, &mut pid);
         let exe = executable(pid)?;
         let allowed = (settings.codex_linked || !settings.linked()) && codex_window(&exe)
-            || settings.dsh_linked && same_path(&exe, &dsh_executable(local))
+            || settings.dsh_linked
+                && installs
+                    .get(Product::Dsh)
+                    .is_some_and(|path| same_path(&exe, &path))
             || settings.workbuddy_linked
-                && crate::workbuddy::runtime_executable(workbuddy)
+                && installs
+                    .get(Product::WorkBuddy)
+                    .and_then(|launcher| crate::workbuddy::runtime_executable(&launcher))
                     .is_some_and(|runtime| same_path(&exe, &runtime));
-        let allowed =
-            allowed || settings.antigravity_linked && crate::antigravity::is_app(&exe, local);
+        let allowed = allowed
+            || settings.antigravity_linked && crate::antigravity::is_app(&exe, &installs.local);
         if !allowed {
             return None;
         }

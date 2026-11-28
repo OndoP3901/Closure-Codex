@@ -2,7 +2,10 @@ use std::{fs, io::Write, path::Path, process::Command};
 
 use serde::Deserialize;
 
-use crate::windows;
+use crate::{
+    install::{Installs, Product},
+    windows,
+};
 
 macro_rules! theme_files {
     ($($path:literal),+ $(,)?) => {
@@ -50,12 +53,15 @@ impl Agent {
         }
     }
 
-    pub fn open(self, local: &Path, theme_enabled: bool) -> Result<(), String> {
+    pub fn open(
+        self,
+        installs: &Installs,
+        theme_enabled: bool,
+        owner: isize,
+    ) -> Result<(), String> {
+        let local = &installs.local;
         if matches!(self, Self::Dsh) {
-            let exe = windows::dsh_executable(local);
-            if !exe.is_file() {
-                return Err("未找到 DSH，请先安装桌面客户端。".into());
-            }
+            let exe = installs.for_launch(Product::Dsh, owner)?;
             crate::settings::write_json(
                 &local.join("ClosureCompanionTauri/dsh-theme.json"),
                 &serde_json::json!({ "enabled": theme_enabled }),
@@ -75,7 +81,7 @@ impl Agent {
             if crate::settings::read_json::<serde_json::Value>(&config, 64 * 1024)
                 .is_ok_and(|value| value["enabled"] == true)
             {
-                self.theme(local, "disable")?;
+                return self.theme(installs, "disable", owner);
             }
             let explorer = std::env::var_os("SystemRoot")
                 .map(std::path::PathBuf::from)
@@ -87,28 +93,40 @@ impl Agent {
                 .map_err(|error| format!("Codex 启动失败（{error}）"))?;
             return Ok(());
         }
-        self.theme(local, if theme_enabled { "enable" } else { "link" })
+        self.theme(
+            installs,
+            if theme_enabled { "enable" } else { "link" },
+            owner,
+        )
     }
 
-    fn theme(self, local: &Path, mode: &str) -> Result<(), String> {
+    fn theme(self, installs: &Installs, mode: &str, owner: isize) -> Result<(), String> {
         let (name, script) = match self {
             Self::Codex => ("Codex", "codex/theme-launcher.cjs"),
             Self::WorkBuddy => ("WorkBuddy", "workbuddy/lib/launcher.cjs"),
             Self::Antigravity => ("Antigravity", "antigravity/theme.cjs"),
             Self::Dsh => return Err("请在 DSH 插件管理中停用可露希尔主题。".into()),
         };
-        let directory = local.join("ClosureCompanionTauri/themes");
+        let directory = installs.local.join("ClosureCompanionTauri/themes");
         install_theme_files(&directory)
             .map_err(|error| format!("桌宠内置主题写入失败（{error}）"))?;
         let mut command = windows::command(Path::new("node.exe"));
         command
             .env_remove("NODE_OPTIONS")
             .arg(directory.join(script));
+        let mut codex_result = None;
         match self {
             Self::Codex => {
-                command.args(["--mode", mode, "--from-menu"]);
+                let temp = tempfile::tempdir()
+                    .map_err(|error| format!("无法创建主题结果目录（{error}）"))?;
+                command
+                    .args(["--mode", mode, "--from-menu", "--result"])
+                    .arg(temp.path().join("result.json"));
+                codex_result = Some(temp);
             }
             Self::WorkBuddy => {
+                let launcher = installs.for_launch(Product::WorkBuddy, owner)?;
+                command.env("CLOSURE_WORKBUDDY_EXE", launcher);
                 command.args(["--mode", mode]);
             }
             Self::Antigravity => {
@@ -125,6 +143,16 @@ impl Agent {
         })?;
         if output.status.success() {
             return Ok(());
+        }
+        if let Some(temp) = codex_result {
+            if let Ok(result) = crate::settings::read_json::<serde_json::Value>(
+                &temp.path().join("result.json"),
+                64 * 1024,
+            ) {
+                if let Some(message) = result["message"].as_str() {
+                    return Err(message.to_owned());
+                }
+            }
         }
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(stderr
@@ -163,7 +191,9 @@ mod tests {
     #[ignore = "opens the locally installed Antigravity desktop app"]
     fn launches_antigravity_with_the_embedded_theme() {
         let local = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
-        Agent::Antigravity.open(&local, true).unwrap();
+        Agent::Antigravity
+            .open(&Installs::new(&local), true, 0)
+            .unwrap();
         let directory = local.join("ClosureAntigravityTheme");
         let session: serde_json::Value =
             crate::settings::read_json(&directory.join("session.json"), 4096).unwrap();

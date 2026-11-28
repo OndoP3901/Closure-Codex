@@ -364,19 +364,148 @@ impl Conversation {
     }
 }
 
-pub fn failure(value: &Value, default: &'static str) -> &'static str {
-    let details = value.to_string().to_ascii_lowercase();
+fn http_failure(code: i64) -> Option<&'static str> {
+    Some(match code {
+        400 => "请求参数无效",
+        401 => "身份验证失败",
+        403 => "权限不足或访问被拒绝",
+        404 => "资源或接口不存在",
+        408 | 504 => "请求超时",
+        429 => "请求频率或额度受限",
+        500 => "服务端内部错误",
+        502 => "上游服务响应异常",
+        503 => "服务暂不可用",
+        500..=599 => "服务端错误",
+        _ => return None,
+    })
+}
+
+fn structured_failure(error: &Value) -> Option<&'static str> {
+    let info = error
+        .get("codex_error_info")
+        .or_else(|| error.get("codexErrorInfo"));
+    let variant = info
+        .and_then(Value::as_object)
+        .and_then(|map| map.iter().next());
+    let number = |v: &Value| v.as_i64().or_else(|| v.as_str()?.parse().ok());
+    for reason in variant
+        .map(|(_, details)| details)
+        .into_iter()
+        .chain([error])
+    {
+        if let Some(message) = [
+            "http_status_code",
+            "httpStatusCode",
+            "statusCode",
+            "status_code",
+        ]
+        .iter()
+        .find_map(|field| reason.get(*field).and_then(number).and_then(http_failure))
+        {
+            return Some(message);
+        }
+    }
+    match error.get("code").and_then(number) {
+        Some(-32700) => return Some("服务无法解析请求"),
+        Some(-32600) => return Some("请求格式无效"),
+        Some(-32601) => return Some("服务未提供此工具"),
+        Some(-32602) => return Some("工具参数无效"),
+        Some(-32603) => return Some("服务端内部错误"),
+        _ => {}
+    }
+    let kind = info
+        .and_then(Value::as_str)
+        .or_else(|| variant.map(|(key, _)| key.as_str()))
+        .or_else(|| error.get("code")?.as_str())?;
+    Some(match kind.replace('_', "").to_ascii_lowercase().as_str() {
+        "contextwindowexceeded" => "超出模型上下文长度",
+        "sessionbudgetexceeded" => "已达到会话预算上限",
+        "usagelimitexceeded" | "insufficientquota" => "已达到使用额度上限",
+        "ratelimitexceeded" => "请求频率受限",
+        "unauthorized" => "身份验证失败",
+        "serveroverloaded" | "flexunavailable" => "服务暂不可用",
+        "internalservererror" => "服务端内部错误",
+        "modelnotfound" => "找不到所选模型",
+        "sandboxerror" => "沙箱限制或执行错误",
+        "badrequest" => "请求参数无效",
+        "httpconnectionfailed" | "responsestreamconnectionfailed" => "连接失败",
+        "responsestreamdisconnected" => "服务连接中断",
+        _ => return None,
+    })
+}
+
+fn message_failure(message: &str) -> Option<&'static str> {
+    let text = message[..message.floor_char_boundary(4096)].to_ascii_lowercase();
+    for prefix in [
+        "http/1.1 ",
+        "http/2 ",
+        "http ",
+        "status code",
+        "http status",
+        "response code",
+    ] {
+        if let Some((_, tail)) = text.split_once(prefix) {
+            let code = tail
+                .trim_start_matches([' ', ':', '='])
+                .split(|ch: char| !ch.is_ascii_digit())
+                .next()
+                .and_then(|s| s.parse().ok());
+            if let Some(reason) = code.and_then(http_failure) {
+                return Some(reason);
+            }
+        }
+    }
     [
-        ("429", "请求过于频繁"),
+        ("context length", "超出模型上下文长度"),
+        ("context window", "超出模型上下文长度"),
         ("rate limit", "请求过于频繁"),
+        ("too many requests", "请求过于频繁"),
         ("timeout", "请求超时"),
         ("timed out", "请求超时"),
+        ("deadline exceeded", "请求超时"),
+        ("enotfound", "域名解析失败"),
+        ("dns", "域名解析失败"),
+        ("tls", "TLS 连接或证书校验失败"),
+        ("certificate", "TLS 连接或证书校验失败"),
         ("permission denied", "权限不足"),
         ("connection", "连接失败"),
         ("unauthorized", "登录或授权失败"),
         ("quota", "可用额度不足"),
     ]
     .into_iter()
-    .find_map(|(needle, message)| details.contains(needle).then_some(message))
-    .unwrap_or(default)
+    .find_map(|(needle, reason)| text.contains(needle).then_some(reason))
+}
+
+pub fn failure<'a>(value: &Value, default: &'a str) -> &'a str {
+    let errors = [
+        value.get("error"),
+        value.pointer("/result/structuredContent/error"),
+        value.pointer("/result/structured_content/error"),
+        value.pointer("/result/error"),
+        Some(value),
+    ]
+    .into_iter()
+    .flatten();
+    errors
+        .clone()
+        .find_map(structured_failure)
+        .or_else(|| {
+            errors
+                .filter_map(|e| e.as_str().or_else(|| e["message"].as_str()))
+                .find_map(message_failure)
+        })
+        .or_else(|| {
+            if value["type"] != "McpToolCall" {
+                return None;
+            }
+            value
+                .pointer("/result/content")?
+                .as_array()?
+                .iter()
+                .take(4)
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .find_map(message_failure)
+        })
+        .unwrap_or(default)
 }

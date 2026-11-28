@@ -1,11 +1,44 @@
 // Executed only in the installed WorkBuddy main renderer. No UI changes.
 (() => {
-  if (window.__closureCompanionBridge?.version === 2) return true
+  const existing = window.__closureCompanionBridge
+  if (existing?.version === 2 && existing.billingVersion === 1) return true
   window.__closureCompanionBridge?.dispose()
   const wb = window.wb
   if (!wb?.conversations?.on || !wb?.on) return false
   const events = [], sessions = new Map(), tools = new Set(), questions = new Set(), modes = new Map(), disposers = []
   let sequence = 0, stopped = false, accountRevision = 0, leaseAt = Date.now()
+  let billing = { status: 'checking' }, nextBillingAt = 0, billingPending = false
+  async function readBilling() {
+    const value = await wb.account.billing()
+    if (value?.unlimited === true) return { status: 'ready', unlimited: true }
+    const amount = value?.creditsLeft
+    if (typeof amount === 'number' || typeof amount === 'string') {
+      const balance = String(amount).trim()
+      if (/^-?\d+(?:\.\d+)?$/.test(balance) && balance.length < 64 && Number.isFinite(Number(balance))) {
+        return { status: 'ready', balance }
+      }
+    }
+    const status = await wb.account.status()
+    return { status: status === 'unauthenticated' ? 'signed-out' : 'unavailable' }
+  }
+  async function refreshBilling() {
+    if (billingPending || Date.now() < nextBillingAt) return
+    billingPending = true
+    const revision = accountRevision
+    nextBillingAt = Date.now() + 60000
+    let timer
+    try {
+      const timeout = new Promise(resolve => { timer = setTimeout(() => resolve({ status: 'unavailable' }), 15000) })
+      const result = await Promise.race([readBilling(), timeout])
+      if (!stopped && revision === accountRevision) billing = result
+    } catch {
+      if (!stopped && revision === accountRevision) billing = { status: 'unavailable' }
+    } finally {
+      clearTimeout(timer)
+      billingPending = false
+      if (billing.status === 'unavailable') nextBillingAt = Math.min(nextBillingAt, Date.now() + 5000)
+    }
+  }
   const instance = crypto.randomUUID()
   const active = state => ['planning', 'working', 'pending'].includes(state)
   const emit = (id, kind, data = {}) => {
@@ -16,6 +49,7 @@
       modes.set(id, { mode: data.mode, at: Date.now() })
     }
     const at = Date.now()
+    if (kind === 'end') nextBillingAt = 0
     const current = sessions.get(id)
     if (current) current.lastActivityAt = at
     events.push({ seq: ++sequence, id, kind, data, at })
@@ -61,7 +95,11 @@
     const key = `${value.conversationId}:${value.permission.id}`
     if (!questions.has(key)) { questions.add(key); emit(value.conversationId, 'question') }
   }))
-  disposers.push(wb.on('wb.account.changed', () => { accountRevision++ }))
+  disposers.push(wb.on('wb.account.changed', () => {
+    accountRevision++
+    billing = { status: 'checking' }
+    nextBillingAt = 0
+  }))
   disposers.push(wb.on('wb:conversation:stateChange', value => info({ id: value.conversationId, state: value.to })))
   disposers.push(wb.on('wb:conversation:infoChange', value => info(value.info)))
   disposers.push(wb.on('wb:conversations:listChanged', value => {
@@ -90,8 +128,12 @@
   }, 10000)
   void refresh(true)
   window.__closureCompanionBridge = {
-    version: 2,
-    snapshot() { leaseAt = Date.now(); return { instance, sequence, accountRevision, sessions: [...sessions.values()], events: events.slice() } },
+    version: 2, billingVersion: 1,
+    snapshot() {
+      leaseAt = Date.now()
+      void refreshBilling()
+      return { instance, sequence, accountRevision, billing, sessions: [...sessions.values()], events: events.slice() }
+    },
     dispose() {
       stopped = true; clearInterval(timer)
       for (const off of disposers) if (typeof off === 'function') off()

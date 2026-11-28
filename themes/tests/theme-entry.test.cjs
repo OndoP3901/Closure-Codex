@@ -85,6 +85,28 @@ test('failed debug startup restores the exact ordinary profile',async()=>{
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'session.json'),'utf8')).running,false)
   } finally {await fs.rm(root,{recursive:true,force:true})}
 })
+
+test('first menu launch remembers the observed profile when Codex stays in the tray',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'closure-theme-first-'))
+  t.after(()=>fs.rm(root,{recursive:true,force:true}))
+  const profile=path.join(root,'原有 配置')
+  await fs.mkdir(profile)
+  await assert.rejects(run({mode:'enable','from-menu':true,'state-root':root},{
+    findPackage:async()=>({}),getProcesses:async()=>[{pid:1,profile,port:null}],
+    choosePort:async()=>19339,buildPayload:async()=>{},
+    closeTarget:async()=>{throw Error('请完整退出 Codex')},
+  }),/请完整退出 Codex/)
+  const config=JSON.parse(await fs.readFile(path.join(root,'config.json'),'utf8'))
+  assert.equal(config.enabled,false)
+  assert.equal(config.profile,profile)
+  const starts=[]
+  const result=await prepareConnection({config,pkg:{},codexHome:config.codexHome,processes:[],api:{
+    choosePort:async()=>19339,startPackaged:async(_pkg,dir)=>starts.push(dir),
+    waitBrowser:async()=>'ws://127.0.0.1:19339/devtools/browser/example'
+  }})
+  assert.deepEqual(starts,[profile])
+  assert.equal(result.startup,'direct')
+})
 test('restore on a fresh or disabled setup does not inspect any installed or running Codex',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'closure-theme-restore-fresh-'))
   try {
@@ -107,14 +129,32 @@ test('restore closes only the recorded profile and leaves other Codex instances 
     await fs.writeFile(path.join(root,'session.json'),JSON.stringify(record))
     const current={pid:10,profile,port:19340,explicitProfile:false}
     const calls=[]
-    const result=await run({mode:'disable','state-root':root},{
+    const result=await run({mode:'disable','from-menu':true,'state-root':root},{
       findPackage:async()=>({executable:'official.exe'}),getProcesses:async()=>[current,{pid:11,profile:path.join(root,'unrelated'),port:19341}],
       stopInjector:async value=>calls.push(['injector',value.injectorPid]),verifyOwner:async port=>calls.push(['verify',port]),
       stopProjectInjectors:async browser=>calls.push(['stop',browser]),closeTarget:async(pkg,value)=>calls.push(['close',value.pid]),
       startPackaged:async(pkg,value,codexHome,port)=>calls.push(['start',value,codexHome,port]),
+      openStoreCodex:async()=>calls.push(['extra activation']),
     })
     assert.equal(result.ok,true)
     assert.deepEqual(calls,[['injector',100],['verify',19340],['stop',record.browser],['close',10],['start',profile,home,null]])
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'config.json'),'utf8')).enabled,false)
   } finally {await fs.rm(root,{recursive:true,force:true})}
+})
+
+test('plain menu launch activates Codex once when the themed process is gone',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'closure-codex-plain-'))
+  t.after(()=>fs.rm(root,{recursive:true,force:true}))
+  const pkg={family:'codex-family',appId:'App'}
+  for(const [enabled,fromMenu,expected] of [[true,true,1],[false,true,1],[true,false,0]]) {
+    await fs.writeFile(path.join(root,'config.json'),JSON.stringify({enabled,profile:path.join(root,'profile')}))
+    const activations=[]
+    await run({mode:'disable','from-menu':fromMenu,'state-root':root},{
+      findPackage:async()=>pkg,getProcesses:async()=>[],stopInjector:async()=>{},
+      openStoreCodex:async value=>activations.push(value),
+      startPackaged:async()=>assert.fail('No themed process to restart'),
+    })
+    assert.deepEqual(activations,expected?[pkg]:[])
+    assert.equal(JSON.parse(await fs.readFile(path.join(root,'config.json'),'utf8')).enabled,false)
+  }
 })

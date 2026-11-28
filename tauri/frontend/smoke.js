@@ -34,6 +34,18 @@ export async function smoke(pet, parameters, untouchedAtLoad) {
   check(![...panel.querySelectorAll('summary')].some(element => element.textContent === '恢复原外观'), 'Old appearance restore menu is still present')
   check(panel.querySelector('input[aria-label="WorkBuddy 联动"][type="checkbox"]'), 'WorkBuddy linkage toggle is unavailable')
   check(panel.querySelector('input[aria-label="Antigravity 联动"][type="checkbox"]'), 'Antigravity linkage toggle is unavailable')
+  const toolNotice = panel.querySelector('input[aria-label="工具失败提示"]')
+  const notices = toolNotice?.closest('details')
+  check(notices?.querySelector('summary')?.textContent === '提醒与播报', 'Tool failure notification settings are unavailable')
+  notices.open = true
+  check(toolNotice.getClientRects().length > 0, 'Tool failure setting stays hidden when expanded')
+  const initialNotice = toolNotice.checked
+  for (const expected of [!initialNotice, initialNotice]) {
+    toolNotice.click()
+    check(toolNotice.checked === expected && JSON.parse(localStorage.getItem('dshcl-settings'))?.toolFailureNotice === expected,
+      'Tool failure setting did not persist')
+  }
+  notices.open = false
   const done = [...panel.querySelectorAll('button')].find(button => button.textContent === '完成')
   check(done, 'The settings Done button is unavailable')
   for (const [agent, name] of [['codex', 'Codex'], ['dsh', 'DSH'], ['workbuddy', 'WorkBuddy'], ['antigravity', 'Antigravity']]) {
@@ -63,7 +75,7 @@ export async function smoke(pet, parameters, untouchedAtLoad) {
   check(untouchedAtLoad, 'Smoke requires an untouched document')
   const audio = createAudio(() => ({ voice: true, voiceVolume: 0, voiceLanguage: 'zh' }))
   let duration
-  check(await audio.playVoice('tap', value => { duration = value }, true), 'Native voice could not start')
+  check(await audio.playVoice('a34', value => { duration = value }, true), 'Native voice could not start')
   check(duration > 500 && audio.getVoiceState()?.volume === 0, 'Native voice duration or mute setting is incorrect')
   audio.stopPreview()
   check(!audio.getVoiceState(), 'Native voice preview did not stop')
@@ -73,11 +85,14 @@ export async function smoke(pet, parameters, untouchedAtLoad) {
     ...state,
     closureCompanion: {
       ...state.closureCompanion,
+      tokenUsage: { turn: 0, total: 4500 },
       accounts: [{
         host: 'codex', name: 'Codex', connected: true, source: 'thirdParty',
         balance: { remaining: 12.34, unit: 'CNY' },
         quota: [{ minutes: 300, remaining: 76.5 }],
         credits: { balance: '42' },
+      }, {
+        host: 'workbuddy', name: 'WorkBuddy', connected: true, accountStatus: 'ready', credits: {balance:'0'},
       }, {
         host: 'antigravity', name: 'Antigravity', connected: true, accountStatus: 'ready',
         quota: [{ minutes: 10080, remaining: 60 }],
@@ -96,10 +111,18 @@ export async function smoke(pet, parameters, untouchedAtLoad) {
     }
   }
   check(hit, 'Could not find a desktop pet hit point for the quota test')
-  canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 1, ...hit }))
-  const displayed = bubbleText.textContent.replace(/\s+/g, '')
-  check(['5小时额度还剩76.5%', 'ChatGPT积分还剩42', '账户余额12.34', 'Antigravity7天额度还剩60%'].every(line => displayed.includes(line)),
-    'Middle click did not show Codex and Antigravity account data together: ' + displayed)
+  function middleClick() {
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 1, ...hit }))
+    return bubbleText.textContent.replace(/\s+/g, '')
+  }
+  const displayed = middleClick()
+  check(['5小时额度还剩76.5%', 'ChatGPT积分还剩42', 'HeJu账户余额12.34', 'WorkBuddy积分还剩0', 'Antigravity7天额度还剩60%'].every(line => displayed.includes(line)),
+    'Middle click did not show all connected account balances')
+  check(displayed.includes('这轮用了0Token') && displayed.includes('这段对话共用了4,500Token')
+    && displayed.split('Token').length === 3, 'Middle click did not show the focused conversation usage exactly once')
+  pet.applyState(state)
+  const empty = middleClick()
+  check(empty.includes('还没有连接应用') && !empty.includes('Token'), 'Middle click did not clear previous usage and show the empty state')
   pet.hideBubble()
 }
 

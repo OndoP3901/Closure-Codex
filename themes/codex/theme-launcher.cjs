@@ -37,9 +37,9 @@ async function getProcesses(pkg) {
     @($all | Where-Object { $_.CommandLine -notmatch '\\s--type=' } | ForEach-Object {
       $main=$_
       $renderer=$all | Where-Object { $_.ParentProcessId -eq $main.ProcessId -and $_.CommandLine -match '--user-data-dir=' } | Select-Object -First 1
-      [pscustomobject]@{pid=$main.ProcessId;created=$main.CreationDate.ToString('o');command=$main.CommandLine;renderer=$renderer.CommandLine}
+      [pscustomobject]@{pid=$main.ProcessId;created=[string]$main.CreationDate.ToFileTimeUtc();command=$main.CommandLine;renderer=$renderer.CommandLine}
     })
-  `,{CLOSURE_THEME_EXE:pkg.executable})
+  `,{CLOSURE_THEME_EXE:pkg.executable},'识别 Codex 窗口和配置目录')
   return [value].flat().filter(Boolean).map(item=>({pid:item.pid,created:item.created,profile:parseProfile(item.renderer)||parseProfile(item.command),
     explicitProfile:!!parseProfile(item.command),headless:/--headless(?:=|\s|$)/.test(item.command),
     port:Number(/--remote-debugging-port=(\d+)(?:\s|$)/.exec(item.command)?.[1]) || null}))
@@ -52,33 +52,38 @@ async function startPackaged(pkg,profile,codexHome,port) {
     $env:CODEX_ELECTRON_START_IN_BACKGROUND=$null
     $env:CODEX_ELECTRON_USER_DATA_PATH=$env:CLOSURE_THEME_PROFILE
     $env:CODEX_HOME=$env:CLOSURE_THEME_HOME
-    Invoke-CommandInDesktopPackage -PackageFamilyName $env:CLOSURE_THEME_FAMILY -AppId $env:CLOSURE_THEME_APP_ID -Command $env:CLOSURE_THEME_EXE -Args $env:CLOSURE_THEME_ARGS
+    try {
+      $launch = @{ FilePath = $env:CLOSURE_THEME_EXE; WorkingDirectory = (Split-Path -LiteralPath $env:CLOSURE_THEME_EXE) }
+      if ($env:CLOSURE_THEME_ARGS) { $launch.ArgumentList = $env:CLOSURE_THEME_ARGS }
+      Start-Process @launch
+    } catch {
+      Invoke-CommandInDesktopPackage -PackageFamilyName $env:CLOSURE_THEME_FAMILY -AppId $env:CLOSURE_THEME_APP_ID -Command $env:CLOSURE_THEME_EXE -Args $env:CLOSURE_THEME_ARGS
+    }
     $true
   `,{CLOSURE_THEME_PROFILE:profile || '',CLOSURE_THEME_HOME:codexHome,CLOSURE_THEME_FAMILY:pkg.family,
-    CLOSURE_THEME_APP_ID:pkg.appId,CLOSURE_THEME_EXE:pkg.executable,CLOSURE_THEME_ARGS:args})
+    CLOSURE_THEME_APP_ID:pkg.appId,CLOSURE_THEME_EXE:pkg.executable,CLOSURE_THEME_ARGS:args},'启动原配置的 Codex')
 }
 async function closeTarget(pkg,target) {
   await powershellJson(`
-    $expected=ConvertFrom-Json $env:CLOSURE_THEME_TARGET
-    $p=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $expected.pid)
+    $p=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $env:CLOSURE_THEME_PID)
     if(!$p) { return $true }
-    if($p.ExecutablePath -ne $env:CLOSURE_THEME_EXE -or $p.CreationDate.ToString('o') -ne $expected.created) { throw 'Codex process identity changed' }
-    [void](Get-Process -Id $expected.pid).CloseMainWindow()
+    if($p.ExecutablePath -ne $env:CLOSURE_THEME_EXE -or [string]$p.CreationDate.ToFileTimeUtc() -ne $env:CLOSURE_THEME_CREATED) { throw 'Codex 进程已切换，请重新点击启动。' }
+    [void](Get-Process -Id $p.ProcessId).CloseMainWindow()
     for($i=0;$i -lt 24;$i++) {
-      if(!(Get-Process -Id $expected.pid -ErrorAction SilentlyContinue)) { return $true }
+      if(!(Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue)) { return $true }
       Start-Sleep -Milliseconds 250
     }
-    $p=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $expected.pid)
-    if($p -and $p.ExecutablePath -eq $env:CLOSURE_THEME_EXE -and $p.CreationDate.ToString('o') -eq $expected.created) { throw 'Codex is still open. Save your work and quit Codex before trying again.' }
+    $p=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $env:CLOSURE_THEME_PID)
+    if($p -and $p.ExecutablePath -eq $env:CLOSURE_THEME_EXE -and [string]$p.CreationDate.ToFileTimeUtc() -eq $env:CLOSURE_THEME_CREATED) { throw '请保存工作，从 Codex 菜单或系统托盘完整退出，再从桌宠点击「启动」。' }
     $true
-  `,{CLOSURE_THEME_EXE:pkg.executable,CLOSURE_THEME_TARGET:JSON.stringify(target)})
+  `,{CLOSURE_THEME_EXE:pkg.executable,CLOSURE_THEME_PID:String(target.pid),CLOSURE_THEME_CREATED:target.created},'关闭普通 Codex 窗口')
   await delay(500)
 }
 async function openStoreCodex(pkg) {
   await powershellJson(`
     Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList ('shell:AppsFolder\\'+$env:CLOSURE_THEME_APP)
     $true
-  `,{CLOSURE_THEME_APP:pkg.family+'!'+pkg.appId})
+  `,{CLOSURE_THEME_APP:pkg.family+'!'+pkg.appId},'打开 Codex')
 }
 async function choosePort() {
   for(let port=19338;port<19358;port++) {
@@ -102,7 +107,7 @@ async function waitBrowser(pkg,profile,port) {
       await verifyOwner(port,pkg.executable,profile)
       return (await version(port)).webSocketDebuggerUrl
     } catch(error) {
-      if(attempt===49)throw new Error('当前 Codex 版本未能开启主题入口，已准备恢复普通启动。',{cause:error})
+      if(attempt===49)throw new Error('等待 Codex 主题入口超时。'+error.message,{cause:error})
       await delay(400)
     }
   }
@@ -152,7 +157,7 @@ async function checkProfile(profile) {
   const directory=await fs.stat(profile).catch(()=>null)
   if(!directory?.isDirectory())throw new Error('之前的 Codex 配置目录已不存在。请先正常打开 Codex，再运行主题入口以重新识别。')
 }
-async function prepareConnection({api,pkg,config,codexHome,processes}) {
+async function prepareConnection({api,pkg,config,codexHome,processes,rememberProfile}) {
   let target=selectTarget(processes,config)
   if(!target && processes.some(item=>!item.headless && !item.profile)) {
     // A normal Codex may still be creating its renderer. Do not open a second profile over it.
@@ -168,6 +173,7 @@ async function prepareConnection({api,pkg,config,codexHome,processes}) {
   if(!target && !config?.profile)throw new Error('首次使用主题，请先正常打开 Microsoft Store 版 Codex，等待主界面出现后，再运行主题入口。')
   const profile=target?.profile || config.profile
   await checkProfile(profile)
+  if (target && !config?.profile && rememberProfile) await rememberProfile(profile)
   let port=target?.port, browser, started=false
   const startup=target ? port ? 'attached' : 'restarted' : 'direct'
   try {
@@ -204,26 +210,30 @@ async function run(options,services={}) {
   const configFile=path.join(root,'config.json'), sessionFile=path.join(root,'session.json')
   const config=await readJson(configFile), previous=await readJson(sessionFile)
   if(options.mode==='status')return {ok:true,message:config?.enabled ? '已配置深色主题启动入口。' : '尚未启用深色主题。',config,session:previous}
-  if(options.mode==='disable' && !config?.enabled)return {ok:true,message:'主题已经关闭。'}
+  if(options.mode==='disable' && !config?.enabled) {
+    if(options['from-menu'])await api.openStoreCodex(await api.findPackage())
+    return {ok:true,message:'主题已经关闭。'}
+  }
   const pkg=await api.findPackage()
   let processes=await api.getProcesses(pkg)
-  let target=selectTarget(processes,config)
-  if(options.mode==='inspect')return {ok:true,message:'Codex 安装与原配置检测完成。',packageVersion:pkg.version,target,processes}
-  if(typeof WebSocket!=='function')throw new Error('请使用完整发行包内的运行时，或安装 Node.js 22 及以上版本。')
   if(options.mode==='disable') {
-    if(!config?.enabled)return {ok:true,message:'主题已经关闭。'}
     await api.stopInjector(previous)
-    const current=processes.find(item=>equalPath(item.profile,config.profile) && item.port===previous?.port)
+    const current=Number.isInteger(previous?.port) && processes.find(item=>!item.headless && equalPath(item.profile,config.profile) && item.port===previous.port)
     if(current) {
       await api.verifyOwner(previous.port,pkg.executable,config.profile)
       await api.stopProjectInjectors(previous.browser)
       await api.closeTarget(pkg,current)
       await api.startPackaged(pkg,config.profile,config.codexHome,null)
+    } else if(options['from-menu']) {
+      await api.openStoreCodex(pkg)
     }
     await writeJson(configFile,{...config,enabled:false})
     await writeJson(sessionFile,{...previous,running:false})
     return {ok:true,message:'已恢复原外观与普通启动。原账号、聊天记录和外观设置均保留。'}
   }
+  let target=selectTarget(processes,config)
+  if(options.mode==='inspect')return {ok:true,message:'Codex 安装与原配置检测完成。',packageVersion:pkg.version,target,processes}
+  if(typeof WebSocket!=='function')throw new Error('请使用完整发行包内的运行时，或安装 Node.js 22 及以上版本。')
   const codexHome=config?.codexHome || process.env.CODEX_HOME || path.join(process.env.USERPROFILE,'.codex')
   // Validate bundled assets before touching an ordinary running app.
   await api.buildPayload()
@@ -238,7 +248,8 @@ async function run(options,services={}) {
   }
   let connection, newInjector, session
   try {
-    connection=await prepareConnection({api,pkg,config,codexHome,processes})
+    connection=await prepareConnection({api,pkg,config,codexHome,processes,
+      rememberProfile: profile => writeJson(configFile,{enabled:false,profile,codexHome})})
     const {profile,port,browser,restarted,startup}=connection
     if(previous?.browser===browser)await api.stopInjector(previous)
     await api.stopProjectInjectors(browser)
@@ -290,11 +301,12 @@ async function main() {
     console.log(JSON.stringify(result,null,2))
   } catch(error) {
     const result={ok:false,message:error.message}
+    await fs.writeFile(path.join(root,'last-error.txt'),new Date().toISOString()+'\n'+error.message+'\n','utf8').catch(()=>{})
     if(values.result)await writeJson(values.result,result)
-    console.error(error.stack || error.message);process.exitCode=1
+    console.error(error.message);process.exitCode=1
   } finally {
     if(lock){await lock.close();await fs.unlink(path.join(root,'operation.lock')).catch(()=>{})}
   }
 }
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1})
-module.exports={parseProfile,selectTarget,run,getProcesses,prepareConnection}
+module.exports={parseProfile,selectTarget,run,getProcesses,prepareConnection,startPackaged}

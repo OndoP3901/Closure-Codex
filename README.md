@@ -4,19 +4,19 @@
 
 [快速上手](#快速上手) · [连接你的工具](#连接你的工具) · [安装深色主题](#安装深色主题) · [开发指南](#开发指南) · [更新日志](CHANGELOG.md)
 
-## 仓库启动入口
-
-双击 [启动桌宠.vbs](启动/启动桌宠.vbs)，然后从桌宠菜单启动各应用。桌宠入口优先选择最近构建的本地 Release EXE，本地构建缺失时使用 `tauri/dist` 中的 EXE。[生成并安装 DSH 主题](启动/DSH%20主题安装.md)
-
 ## 快速上手
 
 桌宠支持 Windows 10 和 11 的 64 位系统，需要 Microsoft Edge WebView2 Runtime。Windows 11 通常已自带，缺少时可从微软安装。[WebView2 下载](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)
 
-1. 下载 v0.10.0 的 Windows x64 桌宠 EXE。需要 DSH 插件或 Antigravity Hooks 安装脚本时，可下载完整 ZIP 并解压到常用目录。发行文件在 [GitHub Releases](https://github.com/OndoP3901/Closure-Codex/releases)，本地构建的发行包位于 `tauri/dist/`。
+1. 下载 v0.11.0 的 Windows x64 便携版。单独使用桌宠可下载 EXE。需要 DSH 主题、联动桥或 Antigravity Hooks 安装脚本时，请下载完整 ZIP，解压到常用目录。[桌宠 EXE](https://github.com/OndoP3901/Closure-Codex/releases/download/v0.11.0/closure-companion-tauri.exe) · [完整 ZIP](https://github.com/OndoP3901/Closure-Codex/releases/download/v0.11.0/Closure-Codex-v0.11.0-win-x64.zip) · [SHA-256 校验值](https://github.com/OndoP3901/Closure-Codex/releases/download/v0.11.0/SHA256SUMS-v0.11.0.txt)
 2. 双击 `closure-companion-tauri.exe`，桌宠就会出现在桌面上。
-3. **左键点击**触发互动，**按住左键拖动**可以换位置，**右键**打开设置或退出。连接应用后，**按一下鼠标滚轮**查看支持的额度或余额。
+3. **左键点击**触发互动，**按住左键拖动**可以换位置，**右键**打开设置或退出。**按一下鼠标滚轮**可查看已连接账户的额度或余额，以及当前对话已上报的本轮和累计 Token 用量。
+
+从旧版升级时，先在桌宠右键菜单选择「退出桌宠」，再用新 EXE 替换原文件。沿用原路径可以继续使用已有的开机自启和 Antigravity Hooks 配置。
 
 右键菜单可以调整角色大小、透明度、气泡、配音语言和音量。取消「在桌面和其他软件中显示」，可让桌宠只跟随前台的联动应用。开机自启默认关闭。开启前请把程序放到长期使用的目录，因为 Windows 会记住它的完整路径。
+
+找不到角色时，在 Windows 系统托盘右键点击桌宠图标，选择「显示桌宠」，角色会出现在鼠标所在的屏幕。再次双击 EXE 也能唤回桌宠。托盘的另一项「退出」会关闭程序。要开关工具报错时的反馈，可在桌宠右键菜单中选择「提醒与播报 → 工具失败提示」。
 
 ### 首次配置
 
@@ -30,13 +30,19 @@
 
 右键打开桌宠菜单，在各应用连接状态右侧点击「启动」。顶部的「启用主题」默认开启，会记住选择，并在从菜单启动应用时生效。关闭后仍可使用联动。DSH 主题插件 0.1.4 起支持在从菜单启动时更新已打开的 DSH 窗口。
 
+WorkBuddy 和 DSH 安装在自定义目录时，桌宠会从 Windows 安装记录和运行中的客户端查找程序。如果「启动」时弹出文件选择框，选中安装目录里的 `WorkBuddy.exe` 或 `DeepSeek Harness.exe`，以后启动会沿用这个位置。
+
 ### Codex
 
 安装 Microsoft Store 版 Codex 后，从桌宠菜单启动。首次加载主题会先识别原有配置，并可能重启一次 Codex。启动前请保存工作。
 
+桌宠会记住首次识别的配置。如果提示普通 Codex 仍在运行，请完整退出 Codex，再从桌宠点击「启动」。菜单会显示失败步骤，完整报错保存在 `%LOCALAPPDATA%\ClosureCodexTheme\last-error.txt`。
+
+启用 Codex 联动后，按下鼠标滚轮可查看官方账号提供的额度和积分。使用 HeJu 中转站时，气泡会单独显示 HeJu 余额。若认证失败、查询超时或受到限流，气泡会提示对应原因。
+
 ### WorkBuddy
 
-从桌宠菜单启动 WorkBuddy 会应用主题并开启联动端口。普通 WorkBuddy 已打开时，请先保存工作并从系统托盘退出。
+普通 WorkBuddy 已打开时，请先保存工作并从系统托盘退出，再从桌宠菜单启动 WorkBuddy 并开启联动。登录 WorkBuddy 官方账号后，按下鼠标滚轮可查看剩余积分，包括零积分和不限量状态。退出账号后，气泡会显示「未登录官方账号」。积分接口已按正式版 5.11.3 核对，并在灰度版 5.12.1 实机验证。
 
 ### DSH
 
@@ -58,7 +64,7 @@ dsh plugin --profile desktop add "C:\解压目录\plugins\dsh-companion\dsh-clos
 
 重新打开 Antigravity，在桌宠右键菜单勾选「Antigravity 联动」，再在 Antigravity 中运行一次任务。桌宠收到任务事件或连上额度来源后，菜单会显示「已连接」。当前提供任务开始、完成、失败和中断状态。关闭联动开关可暂停接收，使用同一脚本加 `-Remove` 可移除可露希尔的 Hooks。安装器会备份原有全局 Hooks 文件。 [Google Hooks 文档](https://antigravity.google/docs/hooks)
 
-通过桌宠菜单启动 Antigravity 后，在桌宠上按下鼠标滚轮，可查看当前模型所属额度池提供的剩余额度。客户端提供 5 小时额度或周额度时，气泡会显示对应周期。
+通过桌宠菜单启动 Antigravity 后，在桌宠上按下鼠标滚轮，可查看当前模型所属额度池提供的剩余额度。已适配 2.36.0 的模型选择器，包括带独立思考档位的模型。气泡按额度池实际提供的周期显示，例如 5 小时或 7 天。
 
 ## 安装深色主题
 
@@ -68,7 +74,7 @@ dsh plugin --profile desktop add "C:\解压目录\plugins\dsh-companion\dsh-clos
 
 ### WorkBuddy 主题
 
-支持 Windows x64 的 WorkBuddy 5.11.3 和 5.12.1。在桌宠菜单点击 WorkBuddy 右侧的「启动」。
+支持 Windows x64 的 WorkBuddy 5.11.3（正式版）和 5.12.1（灰度版）。在桌宠菜单点击 WorkBuddy 右侧的「启动」。[官方版本记录](https://www.codebuddy.cn/docs/workbuddy/Download-History)
 
 ### DSH 主题
 
@@ -87,6 +93,8 @@ dsh plugin --profile desktop add "C:\解压目录\themes\dsh\dsh-closure-codex-t
 主题沿用 Codex、WorkBuddy 和 DSH 的深色配色、紫蓝网格顶栏、洋红强调色和 Cascadia Mono 字体栈。
 
 ## 开发指南
+
+源码仓库的桌宠启动入口会选取最近一次本地 Release 构建。若尚未构建，可将发行版 EXE 放在 `tauri/dist/` 后使用同一入口。[启动桌宠.vbs](启动/启动桌宠.vbs) · [生成并安装 DSH 主题](启动/DSH%20主题安装.md) · [下一步开发建议](下一步开发建议.md)
 
 ### 目录结构
 

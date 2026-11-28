@@ -128,8 +128,41 @@ fn codex_reads_live_account_without_logging_balances() {
 }
 
 #[test]
-#[ignore = "requires the running DSH bridge and WorkBuddy companion connection"]
-fn dsh_and_workbuddy_read_live_accounts_without_logging_balances() {
+#[ignore = "requires a running Store Codex configured for HeJu"]
+fn heju_balance_reaches_the_pet_without_logging_the_amount() {
+    let home = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::home_dir().unwrap().join(".codex"));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let account = runtime
+        .block_on(codex::account(&home))
+        .expect("no Codex account response");
+    let hub = Hub::default();
+    hub.set(0, codex::Codex::default().tick(&home, &account));
+    let state = hub.snapshot(Settings {
+        codex_linked: true,
+        ..Default::default()
+    });
+    let codex = &state["closureCompanion"]["accounts"][0];
+    assert!(
+        matches!(codex["source"].as_str(), Some("thirdParty")),
+        "HeJu provider was not recognized"
+    );
+    assert!(
+        codex["balance"]["remaining"]
+            .as_f64()
+            .is_some_and(f64::is_finite),
+        "HeJu returned no usable balance (status {})",
+        codex["balanceStatus"].as_str().unwrap_or("unknown")
+    );
+}
+
+#[test]
+#[ignore = "requires the running DSH bridge"]
+fn dsh_reads_live_account_without_logging_balances() {
     let local = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
     let dsh = linked::read_dsh(&local.join("ClosureCompanion/bridges"), now());
     assert!(
@@ -143,25 +176,41 @@ fn dsh_and_workbuddy_read_live_accounts_without_logging_balances() {
         ),
         "DSH account service did not finish"
     );
+}
 
-    let executable = crate::workbuddy::executable(&local);
+#[test]
+#[ignore = "requires a signed-in WorkBuddy launched from the pet menu"]
+fn workbuddy_credits_reach_the_pet_without_logging_the_amount() {
+    let local = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+    let executable = crate::install::Installs::new(&local)
+        .get(crate::install::Product::WorkBuddy)
+        .unwrap();
     let mut adapter = crate::workbuddy::WorkBuddy::default();
-    let deadline = std::time::Instant::now() + Duration::from_secs(12);
+    let deadline = std::time::Instant::now() + Duration::from_secs(25);
     loop {
         let host = adapter.tick(&local, &executable);
-        if host.connected {
+        if host.connected && host.account["accountStatus"] == "ready" {
+            let hub = Hub::default();
+            hub.set(2, host);
+            let state = hub.snapshot(Settings {
+                workbuddy_linked: true,
+                ..Default::default()
+            });
+            let credits = &state["closureCompanion"]["accounts"][0]["credits"];
             assert!(
-                matches!(
-                    host.account["accountStatus"].as_str(),
-                    Some("ready" | "signed-out")
-                ),
-                "WorkBuddy account service did not finish"
+                credits["unlimited"] == true
+                    || credits["balance"]
+                        .as_str()
+                        .is_some_and(|s| s.parse::<f64>().is_ok_and(f64::is_finite)),
+                "missing official credits"
             );
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "WorkBuddy bridge did not connect"
+            "WorkBuddy credits did not arrive (connected={}, status={})",
+            host.connected,
+            host.account["accountStatus"].as_str().unwrap_or("waiting")
         );
         std::thread::sleep(Duration::from_millis(250));
     }

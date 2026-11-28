@@ -2,20 +2,17 @@
 
 本插件的**代码**整体可按 MIT 使用，但随包的资源带有各自的来源与限制，分发前请逐项确认。
 
-## 游戏素材（不得二次分发）
+## 游戏素材
 
 - `assets/spine/ac_s_closur_spine.{json,atlas,png}` —— 《明日方舟》可露希尔自走棋皮肤（Spine 3.8），版权归上海鹰角网络所有
 - `assets/audio/*.ogg` —— 由游戏内 `autochess_b_ui_*` 音效转码而来，版权归上海鹰角网络所有
-- `assets/audio/voice/{zh,ja,en,ko}/*.ogg` —— 可露希尔的七句游戏原声，来源为 [Arknights Terra Wiki 配音记录](https://arknights.wiki.gg/wiki/Closure/Dialogue)，版权归游戏权利人所有
+- `assets/audio/voice/{zh,ja,en,ko}/*.ogg` —— 可露希尔的干员语音及卫戍协议终端语音，版权归游戏权利人所有。[Arknights Terra Wiki 配音记录](https://arknights.wiki.gg/wiki/Closure/Dialogue)
 
-这些资源仅限**个人本机自用**。若要公开分发本插件，必须：
-1. 从仓库与打包产物中移除上述文件；
-2. 改为由使用者从自己的游戏安装中提取后本地生成；
-3. 在 README 中说明清楚。
+「可露希尔的 Codex」已取得这些素材随本项目公开发行的单独授权。上游对素材的默认使用范围为个人本机自用。其他项目若要公开分发这些素材，应另行取得权利人许可，或由使用者从自己的游戏安装中提取后在本机使用。
 
 ## Spine 运行时
 
-- `assets/vendor/spine-webgl.js`、`assets/vendor/spine-canvas.js` —— Esoteric Software Spine Runtimes 3.8，采用 Spine Runtimes License（商业使用需授权，个人/内部使用遵循其许可条款）。详见 <https://esotericsoftware.com/spine-runtimes-license>。
+- `assets/vendor/spine-webgl.js` 和 `assets/vendor/spine-canvas.js` 使用 Esoteric Software Spine Runtimes 3.8，随附该版本的许可全文。[Spine Runtimes License](assets/vendor/Spine-Runtimes-LICENSE.txt)
 
 ## 字体
 
@@ -23,5 +20,4 @@
 
 ## 设置与数据文件
 
-运行后会在 `$DSH_HOME/.dshcl.json` 写入设置与当日花费统计（`settings` / `spend`）。
-卸载插件时可手动删除该文件；不删也不会影响 DSH 其他功能。
+Windows 桌宠将联动与自启设置保存在 `%LOCALAPPDATA%\ClosureCompanionTauri\profile.json`。外观和位置保存在同目录的 `webview\` 中。

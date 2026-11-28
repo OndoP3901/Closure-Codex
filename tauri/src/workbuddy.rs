@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::Read,
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -19,12 +19,6 @@ use crate::{
 
 const OBSERVER: &str = include_str!("../../shared/companion/workbuddy-renderer.js");
 const TIMEOUT: Duration = Duration::from_secs(3);
-
-pub fn executable(local: &Path) -> PathBuf {
-    std::env::var_os("CLOSURE_WORKBUDDY_EXE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| local.join("Programs/WorkBuddy/WorkBuddy.exe"))
-}
 
 pub fn runtime_executable(launcher: &Path) -> Option<PathBuf> {
     let install = launcher.parent()?;
@@ -183,13 +177,9 @@ impl Debugger {
 #[derive(Default)]
 pub struct WorkBuddy {
     debugger: Option<Debugger>,
-    runtime: Option<String>,
     sessions: HashMap<String, Conversation>,
     instance: String,
     sequence: u64,
-    account_revision: Value,
-    last_balance: u64,
-    balance: Value,
 }
 
 impl WorkBuddy {
@@ -217,9 +207,7 @@ impl WorkBuddy {
         if self.debugger.is_none() {
             let (port, url) = discover(local, launcher, executable)?;
             self.debugger = Debugger::connect(port, &url, executable);
-            self.runtime = runtime_asset(executable);
             self.instance.clear();
-            self.last_balance = 0;
         }
         let debugger = self.debugger.as_mut()?;
         if !windows::owns_listener(debugger.port, executable)
@@ -294,7 +282,6 @@ impl WorkBuddy {
                             if terminal == "error" { reason } else { "" },
                             true,
                         );
-                        self.last_balance = 0;
                     }
                     Some("mode") => {
                         state.active = true;
@@ -323,22 +310,10 @@ impl WorkBuddy {
             }
         }
         self.sequence = sequence;
-        if self.account_revision != snapshot["accountRevision"] {
-            self.account_revision = snapshot["accountRevision"].clone();
-            self.last_balance = 0;
-        }
-        if timestamp.saturating_sub(self.last_balance) >= 60_000 {
-            self.last_balance = timestamp;
-            let result = self.runtime.as_ref().and_then(|module| {
-                let module = json!(format!("./assets/{module}"));
-                debugger.evaluate(&format!("(async()=>{{const m=await import({module});const v=await m.n().authGetAccountUsage({{locale:'zh'}});return v?{{usageLeft:v.usageLeft}}:null}})()"))
-            });
-            self.balance = credits(result);
-        }
         Some(Host {
             instance: self.instance.clone(),
             connected: true,
-            account: self.balance.clone(),
+            account: credits(&snapshot["billing"]),
             conversations: self
                 .sessions
                 .iter()
@@ -348,78 +323,18 @@ impl WorkBuddy {
     }
 }
 
-fn runtime_asset(executable: &Path) -> Option<String> {
-    let mut file = File::open(executable.parent()?.join("resources/app.asar")).ok()?;
-    let mut prefix = [0_u8; 16];
-    file.read_exact(&mut prefix).ok()?;
-    let size = u32::from_le_bytes(prefix[12..16].try_into().ok()?) as usize;
-    let offset = u64::from(u32::from_le_bytes(prefix[4..8].try_into().ok()?)) + 8;
-    if size == 0 || size > 16 * 1024 * 1024 {
-        return None;
-    }
-    let mut header = vec![0; size];
-    file.read_exact(&mut header).ok()?;
-    let header: Value = serde_json::from_slice(&header).ok()?;
-    let assets = header
-        .pointer("/files/renderer/files/assets/files")?
-        .as_object()?;
-    let mut matching = None;
-    for (key, record) in assets {
-        if !key
-            .strip_prefix("runtime-")
-            .and_then(|key| key.strip_suffix(".js"))
-            .is_some_and(|key| {
-                !key.is_empty()
-                    && key
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
-            })
-            || record["unpacked"] == true
-        {
-            continue;
-        }
-        let Some(length) = record["size"]
-            .as_u64()
-            .filter(|size| *size < 2 * 1024 * 1024)
-        else {
-            continue;
-        };
-        let position = offset.checked_add(record["offset"].as_str()?.parse().ok()?)?;
-        file.seek(SeekFrom::Start(position)).ok()?;
-        let mut source = vec![0; length as usize];
-        file.read_exact(&mut source).ok()?;
-        let source = String::from_utf8_lossy(&source);
-        if source.contains("authGetAccountUsage") && source.contains("getDaemonClient") {
-            if matching.is_some() {
-                return None;
-            }
-            matching = Some(key.clone());
-        }
-    }
-    matching
-}
-
-fn credits(value: Option<Value>) -> Value {
-    let (status, credits) = match value {
-        Some(Value::Null) => ("signed-out", Value::Null),
-        Some(value) => {
-            let amount = &value["usageLeft"];
-            if matches!(amount.as_str(), Some("unlimited" | "Unlimited" | "不限量")) {
-                ("ready", json!({"unlimited":true}))
-            } else {
-                let balance = amount
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| amount.as_f64().map(|v| v.to_string()));
-                match balance.filter(|balance| {
-                    balance.len() < 64 && balance.parse::<f64>().is_ok_and(f64::is_finite)
-                }) {
-                    Some(balance) => ("ready", json!({"balance":balance})),
-                    None => ("unavailable", Value::Null),
-                }
-            }
-        }
-        None => ("unavailable", Value::Null),
+fn credits(value: &Value) -> Value {
+    let (status, credits) = match value["status"].as_str() {
+        Some("checking") => ("checking", Value::Null),
+        Some("signed-out") => ("signed-out", Value::Null),
+        Some("ready") if value["unlimited"] == true => ("ready", json!({"unlimited":true})),
+        Some("ready") => match value["balance"].as_str().filter(|balance| {
+            balance.len() < 64 && balance.parse::<f64>().is_ok_and(f64::is_finite)
+        }) {
+            Some(balance) => ("ready", json!({"balance":balance})),
+            None => ("unavailable", Value::Null),
+        },
+        _ => ("unavailable", Value::Null),
     };
     json!({"source":"official","quota":[],"accountStatus":status,"credits":credits})
 }
@@ -427,33 +342,43 @@ fn credits(value: Option<Value>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::install::{Installs, Product};
     use crate::launch::Agent;
 
     #[test]
     #[ignore = "requires the locally installed WorkBuddy desktop app"]
     fn menu_launch_applies_the_theme_setting_and_connects_workbuddy() {
         let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
-        let launcher = executable(&local);
+        let installs = Installs::new(&local);
+        let launcher = installs.get(Product::WorkBuddy).unwrap();
         let runtime = runtime_executable(&launcher).unwrap();
         let mut adapter = WorkBuddy::default();
 
         for theme_enabled in [true, false, true] {
-            Agent::WorkBuddy.open(&local, theme_enabled).unwrap();
+            Agent::WorkBuddy.open(&installs, theme_enabled, 0).unwrap();
             let (port, url) = discover(&local, &launcher, &runtime).unwrap();
             let mut debugger = Debugger::connect(port, &url, &runtime).unwrap();
             assert_eq!(
                 debugger.evaluate("document.documentElement.getAttribute('data-closure-workbuddy-theme') === 'on'"),
                 Some(json!(theme_enabled))
             );
-            let host = adapter.tick(&local, &launcher);
-            assert!(host.connected, "WorkBuddy bridge did not connect");
-            assert!(
-                matches!(
-                    host.account["accountStatus"].as_str(),
-                    Some("ready" | "signed-out")
-                ),
-                "WorkBuddy account service did not finish"
-            );
+            let deadline = Instant::now() + Duration::from_secs(25);
+            loop {
+                let host = adapter.tick(&local, &launcher);
+                if host.connected
+                    && matches!(
+                        host.account["accountStatus"].as_str(),
+                        Some("ready" | "signed-out")
+                    )
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "WorkBuddy account service did not finish"
+                );
+                std::thread::sleep(Duration::from_millis(250));
+            }
         }
     }
 }

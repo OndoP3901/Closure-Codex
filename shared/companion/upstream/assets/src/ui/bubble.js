@@ -12,31 +12,60 @@ import { createVoiceRotation } from '../core/voice-rotation.js'
 
 export function quotaLines(state) {
   const companion = state?.closureCompanion
-  if (Array.isArray(companion?.accounts)) {
-    return companion.accounts.filter(account => account.connected === true).flatMap(account => {
-      const prefix = account.name || account.host
-      if (account.host === 'workbuddy') {
-        if (account.credits) return [`WorkBuddy 积分${account.credits.unlimited ? '不限量' : '还剩 ' + account.credits.balance}`]
-      } else if (account.host === 'dsh' && account.accountStatus === 'ready') {
-        const walletLine = (wallet, bonus) => `DSH ${bonus ? '赠送余额' : '官方余额'} ${Number(wallet.balance).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${wallet.currency}`
-        const result = [...(account.wallets || []).map(v => walletLine(v, false)), ...(account.bonusWallets || []).map(v => walletLine(v, true))]
-        return result.length ? result : ['DSH 官方余额：暂无钱包']
-      } else if (account.host === 'codex') {
-        const values = quotaLines({ closureCompanion: { ...account, tokenUsage: null, accounts: undefined } })
-        return values.length ? values.map(line => prefix + ' ' + line) : ['Codex：账户余额暂不可用']
-      } else if (account.host === 'antigravity') {
-        if (account.accountStatus === 'disconnected') return ['Antigravity：等待额度连接']
-        const values = quotaLines({ closureCompanion: { quota: account.quota } })
-        return values.length ? values.map(line => prefix + ' ' + line) : ['Antigravity：模型额度暂不可用']
-      }
-      const message = { 'signed-out': '未登录官方账号', unavailable: '官方余额暂不可用', disconnected: '等待连接', checking: '正在查询余额' }[account.accountStatus] || '等待官方余额'
-      return [`${prefix}：${message}`]
-    })
+  const lines = Array.isArray(companion?.accounts)
+    ? companion.accounts.filter(account => account.connected === true).flatMap(accountLines)
+    : modelQuotaLines(companion)
+  const usage = companion?.tokenUsage
+  if (Number.isSafeInteger(usage?.turn) && usage.turn >= 0) {
+    lines.push(`这轮用了 ${usage.turn.toLocaleString('zh-CN')} Token`)
   }
+  if (Number.isSafeInteger(usage?.total) && usage.total >= 0) {
+    lines.push(`这段对话共用了 ${usage.total.toLocaleString('zh-CN')} Token`)
+  }
+  return lines
+}
+
+function accountLines(account) {
+  const prefix = account.name || account.host
+  if (account.host === 'workbuddy' && account.credits) {
+    return [`WorkBuddy 积分${account.credits.unlimited ? '不限量' : '还剩 ' + account.credits.balance}`]
+  }
+  if (account.host === 'dsh' && account.accountStatus === 'ready') {
+    const walletLine = (wallet, bonus) => `DSH ${bonus ? '赠送余额' : '官方余额'} ${Number(wallet.balance).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${wallet.currency}`
+    const result = [...(account.wallets || []).map(v => walletLine(v, false)), ...(account.bonusWallets || []).map(v => walletLine(v, true))]
+    return result.length ? result : ['DSH 官方余额：暂无钱包']
+  }
+  if (account.host === 'codex') {
+    const values = modelQuotaLines(account)
+    return values.length ? values.map(line => prefix + ' ' + line) : ['Codex：账户余额暂不可用']
+  }
+  if (account.host === 'antigravity') {
+    if (account.accountStatus === 'disconnected') return ['Antigravity：等待额度连接']
+    const values = modelQuotaLines({ quota: account.quota })
+    return values.length ? values.map(line => prefix + ' ' + line) : ['Antigravity：模型额度暂不可用']
+  }
+  const message = { 'signed-out': '未登录官方账号', unavailable: '官方余额暂不可用', disconnected: '等待连接', checking: '正在查询余额' }[account.accountStatus] || '等待官方余额'
+  return [`${prefix}：${message}`]
+}
+
+function modelQuotaLines(companion) {
   const lines = []
   if (companion?.source === 'thirdParty') {
     const balance = companion.balance
-    if (balance) lines.push([`账户余额 ${balance.remaining.toFixed(2)}`, balance.unit].filter(Boolean).join(' '))
+    if (Number.isFinite(balance?.remaining)) {
+      lines.push([`HeJu 账户余额 ${balance.remaining.toFixed(2)}`, balance.unit].filter(Boolean).join(' '))
+    } else {
+      const reason = {
+        'no-key': '未找到此中转站的 API Key',
+        unauthorized: 'API Key 认证失败',
+        'rate-limited': '请求频繁，请稍后再查',
+        timeout: '查询超时',
+        network: '连接失败',
+        'service-error': '服务暂不可用',
+        'invalid-response': '服务返回的余额格式无法识别',
+      }[companion.balanceStatus] || '余额暂不可用'
+      lines.push('HeJu：' + reason)
+    }
   }
   for (const { minutes, remaining } of companion?.quota || []) {
     const window = minutes % 1440 === 0 ? minutes / 1440 + ' 天'
@@ -45,11 +74,6 @@ export function quotaLines(state) {
   }
   if (companion?.credits) {
     lines.push(`ChatGPT 积分${companion.credits.unlimited ? '不限量' : '还剩 ' + companion.credits.balance}`)
-  }
-  const usage = companion?.tokenUsage
-  if (usage) {
-    if (usage.turn !== null) lines.push(`这轮用了 ${usage.turn.toLocaleString('zh-CN')} Token`)
-    lines.push(`这段对话共用了 ${usage.total.toLocaleString('zh-CN')} Token`)
   }
   return lines
 }
@@ -304,7 +328,7 @@ export function createBubble(deps) {
     var s = getState()
     if (bubbleMode === 'quota') {
       const usage = quotaLines(s)
-      return usage.length ? ['博士，已连接账户的余额在这儿。', ...usage] : []
+      return usage.length ? usage : ['还没有连接应用，请在右键菜单开启联动。']
     }
     if (interactionText) return [interactionText]
     if (s?.closureCompanion) return lines
@@ -436,7 +460,7 @@ export function createBubble(deps) {
   }
 
   function showQuota() {
-    if (!settings.bubble || !quotaLines(getState()).length) return false
+    if (!settings.bubble) return false
     showBubble(null, null, '', 'quota')
     return true
   }
